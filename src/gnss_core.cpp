@@ -612,7 +612,6 @@ lon_u = usrPositionLLA_[1] * R2S;
 psi = 0.0137/(elRad * R2S + 0.11) - 0.022;
 
 lat_i = lat_u + psi * cos(azRad);
-//lat_i = lat_u + psi * cos(azRad * R2S);
 
 if (lat_i > 0.416)
 	lat_i = 0.416;
@@ -621,8 +620,6 @@ else if (lat_i < -0.416)
 
 lon_i = lon_u + (psi * sin(azRad) / cos(lat_i * S2R));
 lat_m = lat_i + 0.064 * cos((lon_i - 1.617)*S2R);
-//lon_i = lon_u + (psi * sin(azRad * R2S) / cos(lat_i));
-//lat_m = lat_i + 0.064 * cos((lon_i - 1.617));
 
 t = (4.32 * 10000) * lon_i + timeCurrent_;
 t = fmod(t, 86400);
