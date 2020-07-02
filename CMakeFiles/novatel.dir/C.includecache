@@ -1,0 +1,20 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/noah/works/EKFNav/src/matops.c
+stdio.h
+-
+math.h
+-
+malloc.h
+-
+matops.h
+/home/noah/works/EKFNav/src/matops.h
+
+include/matops.h
+

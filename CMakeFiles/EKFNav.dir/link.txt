@@ -1,0 +1,1 @@
+/usr/bin/c++    -rdynamic CMakeFiles/EKFNav.dir/src/main.cpp.o  -o EKFNav libnovatel.a /usr/local/lib/libserial.a -lrt -lboost_system -lboost_filesystem -lboost_thread -lboost_chrono -lboost_date_time -lboost_atomic -lpthread 
