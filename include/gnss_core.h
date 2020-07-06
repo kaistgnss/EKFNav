@@ -35,16 +35,8 @@ using namespace gnss;
 #define USE_BDS (1)
 #define USE_QZS (1)
 #define USE_SMOOTHING (0)
-
-#define NAVIGATION_MODE (0)
-// 0 : GNSS stand-alone
-
-
-//#define EL_MASK_IN_DEGREE	(10)
-//#define CN0_MINIMUM			(38.0)
-
-#define EL_MASK_IN_DEGREE	(0)
-#define CN0_MINIMUM			(0.0)
+#define EL_MASK_IN_DEGREE	(10)
+#define CN0_MINIMUM			(38.0)
 
 /* Constants */
 #define EARTH_RADIUS			(6378136.3)  	// m
@@ -85,7 +77,6 @@ using namespace gnss;
 #define F_RELATIVE_QZS		(-4.442807633e-10)
 
 #define FREQ_GPS_L1			(1.57542e9) 		// Hz
-#define WAVELENGTH_GPS_L1	(SPEED_OF_LIGHT/FREQ_GPS_L1)	/*0.1903*/
 #define FREQ_GLO_L1			(1.602e9)
 #define FREQ_GLO_STEP		(0.5625e6)
 #define FREQ_GAL_E1 			(1.575420e9)
@@ -180,7 +171,7 @@ public:
 	bool 					isCurrentEphemOn_[NUMBER_OF_SATELLITES];
 	bool 					isEphemHealthGood_[NUMBER_OF_SATELLITES];
 	bool 					isGoodForPos_[NUMBER_OF_SATELLITES];
-	bool 					gpsCapable_, gloCapable_, galCapable_, bdsCapable_, qzssCapable_;
+	bool 					gpsCapable_, gloCapable_, galCapable_, bdsCapable_, qzsCapable_;
 	unsigned char 		constMode_;
 
 	~GnssCore(){};

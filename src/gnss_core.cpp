@@ -58,9 +58,9 @@ void GnssCore::ProcessRange(double timeRangeHeader){
 	}
 	CheckSvStatus();
 
-	PrintSvStatus();
-
 	CalcLeastSquaredPosition();
+
+	PrintSvStatus();
 
 	ClearGnssFilter();
 
@@ -491,7 +491,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		if (GetConstFlag(i) == FLAG_BDS)
 			tk = tk - 14.0;
 
-		n0 = sqrt(MU_WGS84 / (A * A * A));
+		n0 = sqrt(mu_datum / (A * A * A));
 		nk = n0 + deltaN;
 		Mk = M0 + nk * tk;
 		KeplerEquation(&Ek, Mk, ecc);
@@ -513,15 +513,15 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 			double yp_t = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
 			double zp_t = yo * sin(ik);
 
-			xp_temp = xp_t * cos(tk * OMEGADOT_WGS84) +
-						yp_t * sin(tk * OMEGADOT_WGS84) * cos(-5 * D2R) +
-						zp_t * sin(tk * OMEGADOT_WGS84) * sin(-5 * D2R);
-			yp_temp = xp_t * -sin(tk * OMEGADOT_WGS84) +
-						yp_t * cos(tk * OMEGADOT_WGS84) * cos(-5 * D2R) +
-						zp_t * cos(tk * OMEGADOT_WGS84) * sin(-5 * D2R);
+			xp_temp = xp_t * cos(tk * omegadote_datum) +
+						yp_t * sin(tk * omegadote_datum) * cos(-5 * D2R) +
+						zp_t * sin(tk * omegadote_datum) * sin(-5 * D2R);
+			yp_temp = xp_t * -sin(tk * omegadote_datum) +
+						yp_t * cos(tk * omegadote_datum) * cos(-5 * D2R) +
+						zp_t * cos(tk * omegadote_datum) * sin(-5 * D2R);
 			zp_temp = yp_t * -sin(-5*D2R) + zp_t * cos(-5*D2R);
 		} else { // GPS/Galileo/QZSS or MEO/IGSO Beidou satellites
-			omegak = omega0 + (omegadot - OMEGADOT_WGS84) * tk - (OMEGADOT_WGS84 * TOE);
+			omegak = omega0 + (omegadot - omegadote_datum) * tk - (omegadote_datum * TOE);
 
 			xp_temp = xo * cos(omegak) - yo * cos(ik) * sin(omegak);
 			yp_temp = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
@@ -529,8 +529,10 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		}
 		// Earth Rotation
 		tau = timeTransit_[i];
-		svPosition_[i][0] =  xp_temp * cos(tau * OMEGADOT_WGS84) + yp_temp * sin(tau * OMEGADOT_WGS84);
-		svPosition_[i][1] = -xp_temp * sin(tau * OMEGADOT_WGS84) + yp_temp * cos(tau * OMEGADOT_WGS84);
+		svPosition_[i][0] =  xp_temp * cos(tau * omegadote_datum) +
+								yp_temp * sin(tau * omegadote_datum);
+		svPosition_[i][1] = -xp_temp * sin(tau * omegadote_datum) +
+								yp_temp * cos(tau * omegadote_datum);
 		svPosition_[i][2] =  zp_temp;
 
 		// velocity
@@ -539,15 +541,17 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		ikdot  =  idot + 2 * nukdot * (cis * cos(2 * phik) - cic * sin(2 * phik));
 		ukdot  =  nukdot + 2 * nukdot * (cus * cos(2 * phik) - cuc * sin(2 * phik));
 		rkdot  =  ecc * A * Ekdot * sin(Ek) + 2 * nukdot * (crs * cos(2 * phik) - crc * sin(2 * phik));
-		omegakdot = omegadot - OMEGADOT_WGS84;
+		omegakdot = omegadot - omegadote_datum;
 		xodot  =  rkdot * cos(uk) - rk * ukdot * sin(uk);
 		yodot  =  rkdot * sin(uk) + rk * ukdot * cos(uk);
 
 		xv_temp =  -xo * omegakdot * sin(omegak) + xodot * cos(omegak) - yodot * sin(omegak) * cos(ik) - yo * (omegakdot * cos(omegak) * cos(ik) - (ikdot) * sin(omegak) * sin(ik));
 		yv_temp =  xo * omegakdot * cos(omegak) + xodot * sin(omegak) + yodot * cos(omegak) * cos(ik) - yo * (omegakdot * sin(omegak) * cos(ik) + (ikdot) * cos(omegak) * sin(ik));
 		zv_temp =  yo * ikdot * cos(ik) + yodot * sin(ik);
-		svVelocity_[i][0] =  xv_temp * cos(tau * OMEGADOT_WGS84) + yv_temp * sin(tau * OMEGADOT_WGS84);
-		svVelocity_[i][1] = -xv_temp * sin(tau * OMEGADOT_WGS84) + yv_temp * cos(tau * OMEGADOT_WGS84);
+		svVelocity_[i][0] =  xv_temp * cos(tau * omegadote_datum) +
+								yv_temp * sin(tau * omegadote_datum);
+		svVelocity_[i][1] = -xv_temp * sin(tau * omegadote_datum) +
+								yv_temp * cos(tau * omegadote_datum);
 		svVelocity_[i][2] =  zv_temp;
 	};
 
@@ -795,42 +799,6 @@ void GnssCore::CalcLeastSquaredPosition() {
 
 		Norm_dX = sqrt(dx(0)*dx(0) + dx(1)*dx(1) + dx(2)*dx(2));
 	}
-	double err[3];
-
-	Vector3d xyz;
-	xyz(0) = usrPositionECEF_[0];
-	xyz(1) = usrPositionECEF_[1];
-	xyz(2) = usrPositionECEF_[2];
-	Vector3d enu = ConvertECEF2ENU(xyz, truelat * D2R, truelon * D2R, truealt);
-
-	xyz(0) = usrBestposECEF_[0];
-	xyz(1) = usrBestposECEF_[1];
-	xyz(2) = usrBestposECEF_[2];
-	Vector3d enu_bp = ConvertECEF2ENU(xyz, truelat * D2R, truelon * D2R, truealt);
-
-	Position bp = GNSS::getInstance()->GetBestpos();
-	err[0] = usrPositionECEF_[0] - usrBestposECEF_[0];
-	err[1] = usrPositionECEF_[1] - usrBestposECEF_[1];
-	err[2] = usrPositionECEF_[2] - usrBestposECEF_[2];
-
-	printf("\n");
-//	printf("# of Sv :: %2i   || # of Const. :: %2i \n", numSvForPos_, numConstForPos_);
-	printf("ESTIMATE:: %10.2f %10.2f %10.2f  --> err %6.3f %6.3f %6.3f (%2i)\n",
-			usrPositionECEF_[0], usrPositionECEF_[1], usrPositionECEF_[2],
-			enu(0), enu(1), enu(2), numSvForPos_);
-	printf("BESTPOS :: %10.2f %10.2f %10.2f  --> err %6.3f %6.3f %6.3f (%2i)\n",
-			usrBestposECEF_[0], usrBestposECEF_[1], usrBestposECEF_[2],
-			enu_bp(0), enu_bp(1), enu_bp(2), bp.number_of_satellites_in_solution);
-//	printf(" Error  :: %10.2f %10.2f %10.2f\n",err[0],err[1],err[2]);
-
-//	FILE *save_file;
-//	char SaveFileName[50];
-//	sprintf(SaveFileName, "positionerr.txt");
-//
-//	save_file = fopen(SaveFileName, "ab");
-//	fprintf(save_file, "%f,%f,%f,%f,%f,%f,%f\n",
-//			timeCurrent_,enu(0),enu(1),enu(2),enu_bp(0),enu_bp(1),enu_bp(2));
-//	fclose (save_file);
 
 } // function: EstimateUsrPos
 
@@ -989,13 +957,9 @@ VectorXd GnssCore::SetResidualVector(){
 			}
 			drho(idxSv) = rangeMeasurement + SPEED_OF_LIGHT*svClockOffset_[i]
 							- svTropoErr_[i] - svIonoErr_[i] - (r + usrClockOffset);
-//			printf("%2i %f %f %f %f %f %f\n", i, rangeMeasurement,
-//					SPEED_OF_LIGHT*svClockOffset_[i], svTropoErr_[i], svIonoErr_[i],
-//					r, usrClockOffset);
+
 			idxSv++;
-
 		}
-
 	}
 	return drho;
 } // function: SetResidualVector
@@ -1022,7 +986,6 @@ void GnssCore::ClearGnssFilter(){
 
 			mCountOnCSC1_[i]			= 1;
 			mCountOnCSC2_[i]			= 1;
-//			mCurrentCSC1_[i] 			= 0;
 		}
 	}
 
@@ -1034,6 +997,7 @@ void GnssCore::ClearGnssFilter(){
 	gloCapable_ = false;
 	galCapable_ = false;
 	bdsCapable_ = false;
+	qzsCapable_ = false;
 
 	RangeData obsRemoval = {0,};
 	for (uint8_t i = 0; i < NUMBER_OF_SATELLITES; i++){
@@ -1119,13 +1083,13 @@ bool GnssCore::CheckSvStatus(){
 			break;
 		case FLAG_QZS:
 			if (isGoodForPos_[i])
-				qzssCapable_ = true;
+				qzsCapable_ = true;
 			break;
 		}
 	}
-	constMode_ = gpsCapable_ + 2*gloCapable_ + 4*galCapable_ + 8*bdsCapable_ + 16*qzssCapable_;
+	constMode_ = gpsCapable_ + 2*gloCapable_ + 4*galCapable_ + 8*bdsCapable_ + 16*qzsCapable_;
 
-	numConstForPos_ = gpsCapable_ + gloCapable_ + galCapable_ + bdsCapable_ + qzssCapable_;
+	numConstForPos_ = gpsCapable_ + gloCapable_ + galCapable_ + bdsCapable_ + qzsCapable_;
 
 	if (numConstForPos_ > 0)
 		return true;
@@ -1149,7 +1113,7 @@ void GnssCore::SetUsrClockOffset(VectorXd dx){
 		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(3);
 		break;
 	case QZSS:
-		cout << "QZSS must be used with other constellations together." << endl;
+		cout << "QZSS must not be used alone (insufficient satellites)." << endl;
 		break;
 	case GPS_GLO:
 		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
@@ -1299,19 +1263,19 @@ void GnssCore::PrintSvStatus(){
 
 		switch (GetConstFlag(i)){
 		case FLAG_GPS:
-			sprintf(svtype, "GPS ");
+			sprintf(svtype, "GPS");
 			break;
 		case FLAG_GLO:
-			sprintf(svtype, "GLO ");
+			sprintf(svtype, "GLO");
 			break;
 		case FLAG_GAL:
-			sprintf(svtype, "GAL ");
+			sprintf(svtype, "GAL");
 			break;
 		case FLAG_BDS:
-			sprintf(svtype, "BDS ");
+			sprintf(svtype, "BDS");
 			break;
 		case FLAG_QZS:
-			sprintf(svtype, "QZSS");
+			sprintf(svtype, "QZS");
 			break;
 		}
 
@@ -1320,12 +1284,45 @@ void GnssCore::PrintSvStatus(){
 			svtype, i, svElRad_[i]*R2D, svAzRad_[i]*R2D, mCN0_[i], mCountOnCSC1_[i],
 			isMeasurementOn_[i], isCurrentEphemOn_[i], isEphemHealthGood_[i],
 			isElGood[i], isCN0[i]);
-	//	printf("[%s] %2i\t[EL] %5.2f\t[AZ] %7.2f\t[CN0] %5.2f\t [SCnt] %3i [Used] %s\n",
-	//			svtype, i, svElRad_[i]*R2D, svAzRad_[i]*R2D, mCN0_[i], mCountOnCSC1_[i],
-	//			isused);
+	} // for
 
+	double err[3];
 
-	}
+	Vector3d xyz;
+	xyz(0) = usrPositionECEF_[0];
+	xyz(1) = usrPositionECEF_[1];
+	xyz(2) = usrPositionECEF_[2];
+	Vector3d enu = ConvertECEF2ENU(xyz, truelat * D2R, truelon * D2R, truealt);
+
+	xyz(0) = usrBestposECEF_[0];
+	xyz(1) = usrBestposECEF_[1];
+	xyz(2) = usrBestposECEF_[2];
+	Vector3d enu_bp = ConvertECEF2ENU(xyz, truelat * D2R, truelon * D2R, truealt);
+
+	Position bp = GNSS::getInstance()->GetBestpos();
+	err[0] = usrPositionECEF_[0] - usrBestposECEF_[0];
+	err[1] = usrPositionECEF_[1] - usrBestposECEF_[1];
+	err[2] = usrPositionECEF_[2] - usrBestposECEF_[2];
+
+	printf("\n");
+	printf("ESTIMATE:: %10.2f %10.2f %10.2f  --> err %6.3f %6.3f %6.3f (%2i)\n",
+			usrPositionECEF_[0], usrPositionECEF_[1], usrPositionECEF_[2],
+			enu(0), enu(1), enu(2), numSvForPos_);
+	printf("BESTPOS :: %10.2f %10.2f %10.2f  --> err %6.3f %6.3f %6.3f (%2i)\n",
+			usrBestposECEF_[0], usrBestposECEF_[1], usrBestposECEF_[2],
+			enu_bp(0), enu_bp(1), enu_bp(2), bp.number_of_satellites_in_solution);
+	printf("\n");
+
+	//	printf(" Error  :: %10.2f %10.2f %10.2f\n",err[0],err[1],err[2]);
+
+	//	FILE *save_file;
+	//	char SaveFileName[50];
+	//	sprintf(SaveFileName, "positionerr.txt");
+	//
+	//	save_file = fopen(SaveFileName, "ab");
+	//	fprintf(save_file, "%f,%f,%f,%f,%f,%f,%f\n",
+	//			timeCurrent_,enu(0),enu(1),enu(2),enu_bp(0),enu_bp(1),enu_bp(2));
+	//	fclose (save_file);
 }
 
 
