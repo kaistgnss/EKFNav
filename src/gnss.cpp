@@ -45,8 +45,11 @@ void RunGnssThread(){
 	GNSS::getInstance()->SendCommand("clockadjust enable", true);
 	GNSS::getInstance()->SendCommand("dynamics auto", true);
 	GNSS::getInstance()->SendCommand("pdpfilter disable", true);
-	GNSS::getInstance()->SetGpsSvElevationAngleCutoff(5.0);
-	GNSS::getInstance()->SetGloSvElevationAngleCutoff(5.0);
+	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_GPS);
+	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_GLO);
+	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_GAL);
+	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_BDS);
+	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_QZS);
 
 	// required Logs for recording RINEX format
 //	my_gps.ConfigureLogs("versionb once");
@@ -62,10 +65,14 @@ void RunGnssThread(){
 		GNSS::getInstance()->ConfigureLogs("gpsephemb onchanged");
 	if (USE_GLO)
 		GNSS::getInstance()->ConfigureLogs("gloephemerisb onchanged");
-	if (USE_GAL)
-		GNSS::getInstance()->ConfigureLogs("galfnavephemerisb onchanged");
+	if (USE_GAL) {
+		GNSS::getInstance()->ConfigureLogs("galinavephemerisb onchanged");
+		GNSS::getInstance()->ConfigureLogs("galclockb onchanged");
+	}
 	if (USE_BDS)
 		GNSS::getInstance()->ConfigureLogs("bdsephemerisb onchanged");
+	if (USE_QZS)
+		GNSS::getInstance()->ConfigureLogs("qzssephemerisb onchanged");
 	GNSS::getInstance()->ConfigureLogs("ionutcb onchanged");
 	//	my_gps.ConfigureLogs("gphdtdualantenna ontime 0.2");
 
@@ -149,6 +156,7 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 		memcpy(&msgBestposb_, message, sizeof(msgBestposb_));
 		timeBestposb_ = read_timestamp_;
 		isBestposReady_ = true;
+//		printf("%x %x\n", msgBestposb_.gal_bds_used_mask, msgBestposb_.gps_glo_used_mask);
 
 //		if (best_position_callback_)
 //			best_position_callback_(msgBESTPOSB_, read_timestamp_);
@@ -176,8 +184,9 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 		ChannelStatus channelStatus;
 		for (int i = 0; i < obsNumber; i++){
 			channelStatus = msgRangeb_.range_data[i].channel_status;
-//			CONSTELLATION_FLAG constFlag = ;
+
 			prn = msgRangeb_.range_data[i].satellite_prn;
+
 			switch (channelStatus.satellite_sys){
 			case FLAG_GPS:
 				/******************* GPS *****************/
@@ -215,9 +224,14 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 			case FLAG_GAL:
 				index = prn - PRNOFFSET_GAL;
 				switch (channelStatus.signal_type) {
-				case GAL_E5a:
-					GnssCore::getInstance()->obsGalE5a_[index] = msgRangeb_.range_data[i];
-					GnssCore::getInstance()->isMeasurementOn_[prn - 1] = true;
+				case GAL_E1:
+					GnssCore::getInstance()->obsGalE1_[index] = msgRangeb_.range_data[i];
+					GnssCore::getInstance()->isMeasurementOn_[prn + 55] = true;
+					break;
+					//
+				case GAL_E5b:
+					GnssCore::getInstance()->obsGalE5b_[index] = msgRangeb_.range_data[i];
+//					GnssCore::getInstance()->isMeasurementOn_[prn - 1] = true;
 					break;
 				default:
 					break;
@@ -230,30 +244,35 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 				switch (channelStatus.signal_type){
 				case BDS_B1_D1:
 					GnssCore::getInstance()->obsBdsB1I_[index] = msgRangeb_.range_data[i];
-					GnssCore::getInstance()->isMeasurementOn_[prn - 1] = true;
+					GnssCore::getInstance()->isMeasurementOn_[prn + 91] = true;
 				default:
 					break;
 				}
 				break;
 				/***************** Beidou ***************/
+				/****************** QZSS ****************/
+			case FLAG_QZS:
+				index = prn - PRNOFFSET_QZS;
+				switch (channelStatus.signal_type){
+				case QZS_L1CA:
+					GnssCore::getInstance()->obsQzsL1CA_[index] = msgRangeb_.range_data[i];
+					GnssCore::getInstance()->isMeasurementOn_[prn - 38] = true;
+				default:
+					break;
+				}
+				break;
+				/****************** QZSS ****************/
+
 			default:
 				break;
 			}
-//				printf("%i %i %i\n", msgRangeb_.range_data[i].satellite_prn,
-//						msgRangeb_.range_data[i].channel_status.satellite_sys,
-//						msgRangeb_.range_data[i].channel_status.signal_type);
 		}
 
 		double timeRangeHeader;
 		timeRangeHeader = (double) msgRangeb_.header.gps_millisecs / 1000.0;
+
 		if (isBestposReady_)
 			GnssCore::getInstance()->ProcessRange(timeRangeHeader);
-
-//		if (range_measurements_callback_) {
-//			cout << "port=" << serial_port_->getPort() << endl;
-//			range_measurements_callback_(msgRangeb_, read_timestamp_);
-//		}
-
 		break;
 
 	case GPSEPHEMB_LOG_TYPE:
@@ -262,15 +281,12 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 
 		prn = msgGpsEphemerisFor1sv.prn; // 1~32
 		index = prn - PRNOFFSET_GPS;
-//		std::cout << msgGpsEphemerisFor1sv.time_of_ephemeris << std::endl;
 		GnssCore::getInstance()->currentGpsEphemerides_[index] = msgGpsEphemerisFor1sv;
 		GnssCore::getInstance()->isCurrentEphemOn_[index] = true;
 		if (msgGpsEphemerisFor1sv.health == 0)
 			GnssCore::getInstance()->isEphemHealthGood_[index] = true;
 
 		printf("GPS Ephem on : %i\n", index);
-//		if (gps_ephemeris_callback_)
-//			gps_ephemeris_callback_(msgGpsEphemeris_, read_timestamp_);
 		break;
 
 	case GLOEPHEMB_LOG_TYPE:
@@ -281,23 +297,25 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 		msgGloEphemerisFor1sv.e_time = msgGloEphemerisFor1sv.e_time / 1000.0;
 
 		index = prn - PRNOFFSET_GLO;
-		printf("GLO Ephem on : prn %2i \n", prn );
 		GnssCore::getInstance()->currentGloEphemerides_[index] = msgGloEphemerisFor1sv;
 		GnssCore::getInstance()->isCurrentEphemOn_[prn - 6] = true;
+
 		if (msgGloEphemerisFor1sv.health < 4)
 			GnssCore::getInstance()->isEphemHealthGood_[prn - 6] = true;
 		// Update Current&Last GLONASS Ephemeris
 		break;
 
-	case GALFNAVEPHEMB_LOG_TYPE:
-		GalFnavEphemeris msgGalEphemerisFor1sv;
+	case GALINAVEPHEMB_LOG_TYPE:
+		GalInavEphemeris msgGalEphemerisFor1sv;
 		memcpy(&msgGalEphemerisFor1sv, message, sizeof(msgGalEphemerisFor1sv));
 
 		prn = msgGalEphemerisFor1sv.satid;
+		index = prn - PRNOFFSET_GAL;
 
 		GnssCore::getInstance()->currentGalEphemerides_[index] = msgGalEphemerisFor1sv;
-		if (msgGalEphemerisFor1sv.E5aHealth == 0)
-			GnssCore::getInstance()->isEphemHealthGood_[prn - 1] = true;
+		GnssCore::getInstance()->isCurrentEphemOn_[prn + 55] = true;
+//		if (msgGalEphemerisFor1sv.E5aHealth == 0)
+			GnssCore::getInstance()->isEphemHealthGood_[prn + 55] = true;
 		break;
 
 	case BDSEPHEMB_LOG_TYPE:
@@ -305,12 +323,31 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 		memcpy(&msgBdsEphemerisFor1sv, message, sizeof(msgBdsEphemerisFor1sv));
 
 		prn = msgBdsEphemerisFor1sv.satid;
+		index = prn - PRNOFFSET_BDS;
 
 		GnssCore::getInstance()->currentBdsEphemerides_[index] = msgBdsEphemerisFor1sv;
-		if (msgBdsEphemerisFor1sv.health1 == 0)
-			GnssCore::getInstance()->isEphemHealthGood_[prn - 1] = true;
+		GnssCore::getInstance()->isCurrentEphemOn_[prn + 91] = true;
+
+//		if (msgBdsEphemerisFor1sv.health1 == 0)
+			GnssCore::getInstance()->isEphemHealthGood_[prn + 91] = true;
 		break;
 
+	case QZSSEPHEMB_LOG_TYPE:
+		QzssEphemeris msgQzssEphemerisFor1sv;
+		memcpy(&msgQzssEphemerisFor1sv, message, sizeof(msgQzssEphemerisFor1sv));
+
+		prn = msgQzssEphemerisFor1sv.satid;
+		index = prn - PRNOFFSET_QZS;
+
+		GnssCore::getInstance()->currentQzsEphemerides_[index] = msgQzssEphemerisFor1sv;
+		GnssCore::getInstance()->isCurrentEphemOn_[prn - 38] = true;
+
+//		if (msgQzssEphemerisFor1sv.health == 0)
+		GnssCore::getInstance()->isEphemHealthGood_[prn - 38] = true;
+		break;
+	case GALCLOCKB_LOG_TYPE:
+		memcpy(&msgGalClockb_, message, sizeof(msgGalClockb_));
+		break;
 ///*
 	case IONUTCB_LOG_TYPE:
 		memcpy(&msgIonutcb_,message,sizeof(msgIonutcb_));
@@ -722,23 +759,26 @@ bool GNSS::SendCommand(std::string cmd_msg, bool wait_for_ack) {
 	}
 }
 
-bool GNSS::SetGpsSvElevationAngleCutoff(float angle) {
+bool GNSS::SetSvElevationAngleCutoff(float angle, CONSTELLATION_FLAG flag) {
 	try {
 		std::stringstream ang_cmd;
-		ang_cmd << "ECUTOFF " << angle;
-		return SendCommand(ang_cmd.str());
-	} catch (std::exception &e) {
-		std::stringstream output;
-		output << "Error in Novatel::SetSvElevationCutoff(): " << e.what();
-		log_error_(output.str());
-		return false;
-	}
-}
-
-bool GNSS::SetGloSvElevationAngleCutoff(float angle) {
-	try {
-		std::stringstream ang_cmd;
-		ang_cmd << "GLOECUTOFF " << angle;
+		switch (flag){
+		case FLAG_GPS:
+			ang_cmd << "ECUTOFF " << angle;
+			break;
+		case FLAG_GLO:
+			ang_cmd << "GLOECUTOFF " << angle;
+			break;
+		case FLAG_GAL:
+			ang_cmd << "GALECUTOFF " << angle;
+			break;
+		case FLAG_BDS:
+			ang_cmd << "BDSECUTOFF " << angle;
+			break;
+		case FLAG_QZS:
+			ang_cmd << "QZSSECUTOFF " << angle;
+			break;
+		}
 		return SendCommand(ang_cmd.str());
 	} catch (std::exception &e) {
 		std::stringstream output;

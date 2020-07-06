@@ -63,6 +63,8 @@ gnss_core.h
 /home/noah/works/EKFNav/src/gnss_core.h
 navutils.h
 /home/noah/works/EKFNav/src/navutils.h
+time.h
+-
 cmath
 -
 
@@ -122,6 +124,8 @@ string
 cstring
 -
 iostream
+-
+math.h
 -
 novatel/novatel_enums.h
 include/novatel/novatel_enums.h

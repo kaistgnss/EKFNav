@@ -380,6 +380,8 @@ enum BINARY_LOG_TYPE
   GALINAVEPHEMB_LOG_TYPE = 1309,
   GALFNAVEPHEMB_LOG_TYPE = 1310,
   BDSEPHEMB_LOG_TYPE = 1696,
+  QZSSEPHEMB_LOG_TYPE = 1336,
+  GALCLOCKB_LOG_TYPE = 1121,
 
 
   //SPAN - INS specific logs
@@ -408,26 +410,42 @@ enum CONSTELLATION_FLAG{
 	FLAG_SBAS 	= 2,
 	FLAG_GAL 	= 3,
 	FLAG_BDS 	= 4,
-	FLAG_QZSS 	= 5
+	FLAG_QZS 	= 5
 };
 
 enum CONSTELLATION_MODE{
-	NoUse 	 = 0,
-	GPS = 1,
-	GLO = 2,
-	GAL = 4,
-	BDS = 8,
-	GPS_GLO = 3,
-	GPS_GAL = 5,
-	GPS_BDS = 9,
-	GLO_GAL = 6,
-	GLO_BDS = 10,
-	GAL_BDS = 12,
-	GPS_GLO_GAL = 7,
-	GPS_GLO_BDS = 11,
-	GPS_GAL_BDS = 13,
-	GLO_GAL_BDS = 14,
-	GPS_GLO_GAL_BDS = 15
+	NoUse 	 				= 0,
+	GPS 					= 1,
+	GLO 					= 2,
+	GAL 					= 4,
+	BDS 					= 8,
+	QZSS 					= 16,
+	GPS_GLO 				= GPS + GLO,
+	GPS_GAL 				= GPS + GAL,
+	GPS_BDS 				= GPS + BDS,
+	GPS_QZSS 				= GPS + QZSS,
+	GLO_GAL 				= GLO + GAL,
+	GLO_BDS 				= GLO + BDS,
+	GLO_QZSS 				= GLO + QZSS,
+	GAL_BDS 				= GAL + BDS,
+	GAL_QZSS 				= GAL + QZSS,
+	BDS_QZSS 				= BDS + QZSS,
+	GPS_GLO_GAL 			= GPS + GLO + GAL,
+	GPS_GLO_BDS 			= GPS + GLO + BDS,
+	GPS_GLO_QZSS 			= GPS + GLO + QZSS,
+	GPS_GAL_BDS 			= GPS + GAL + BDS,
+	GPS_GAL_QZSS 			= GPS + GAL + QZSS,
+	GPS_BDS_QZSS 			= GPS + BDS + QZSS,
+	GLO_GAL_BDS 			= GLO + GAL + BDS,
+	GLO_GAL_QZSS 			= GLO + GAL + QZSS,
+	GLO_BDS_QZSS 			= GLO + BDS + QZSS,
+	GAL_BDS_QZSS 			= GAL + BDS + QZSS,
+	GPS_GLO_GAL_BDS 		= GPS + GLO + GAL + BDS,
+	GPS_GLO_GAL_QZSS 		= GPS + GLO + GAL + QZSS,
+	GPS_GLO_BDS_QZSS 		= GPS + GLO + BDS + QZSS,
+	GPS_GAL_BDS_QZSS 		= GPS + GAL + BDS + QZSS,
+	GLO_GAL_BDS_QZSS 		= GLO + GAL + BDS + QZSS,
+	GPS_GLO_GAL_BDS_QZSS = GPS + GLO + GAL + BDS + QZSS
 };
 
 enum SIGNAL_TYPE_GPS{
@@ -464,6 +482,14 @@ enum SIGNAL_TYPE_GAL{
 	GAL_E5a		= 12,
 	GAL_E5b		= 17,
 	GAL_E5AltBOC 	= 20
+};
+
+enum SIGNAL_TYPE_QZSS{
+	QZS_L1CA		= 0,
+	QZS_L5		= 14,
+	QZS_L1C		= 16,
+	QZS_L2C		= 17,
+	QZS_L6P		= 27
 };
 
 typedef enum BINARY_LOG_TYPE BINARY_LOG_TYPE;

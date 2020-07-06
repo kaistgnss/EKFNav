@@ -211,8 +211,7 @@ public:
      * recommended except in specific situations
      * (Angle = +-90 deg)
      */
-    bool SetGpsSvElevationAngleCutoff(float angle);
-    bool SetGloSvElevationAngleCutoff(float angle);
+    bool SetSvElevationAngleCutoff(float angle, CONSTELLATION_FLAG flag);
 
     /*!
      * SetPositionTimeout (POSTIMEOUT) sets the timeout value for the
@@ -341,6 +340,7 @@ public:
     PositionEcef GetBestxyz(){ return msgBestxyzb_; }
     double GetTimeBestpos(){ return timeBestposb_; }
     IonosphericModel GetIonutc(){ return msgIonutcb_; }
+    GalClock GetGalClock() { return msgGalClockb_; }
 
     bool isBestposReady_;
 private:
@@ -515,7 +515,7 @@ private:
 	Velocity 				msgBestvelb_;
 	PositionEcef 			msgBestxyzb_;
 	IonosphericModel 		msgIonutcb_;
-
+	GalClock				msgGalClockb_;
 	/* Class Declaration :: GnssCore */
 //	GnssCore 				GnssData;
 };

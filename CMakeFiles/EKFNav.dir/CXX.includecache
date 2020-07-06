@@ -71,6 +71,8 @@ cstring
 -
 iostream
 -
+math.h
+-
 novatel/novatel_enums.h
 include/novatel/novatel_enums.h
 novatel/novatel_structures.h

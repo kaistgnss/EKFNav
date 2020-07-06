@@ -420,12 +420,12 @@ struct Position
 	float solution_age;					//!< solution age (sec)
 	uint8_t number_of_satellites;		//!< number of satellites tracked
 	uint8_t number_of_satellites_in_solution;	//!< number of satellites used in solution
-	uint8_t num_gps_plus_glonass_l1;	//!< number of GPS plus GLONASS L1 satellites used in solution
-	uint8_t num_gps_plus_glonass_l2;	//!< number of GPS plus GLONASS L2 satellites used in solution
+	uint8_t number_of_satellites_l1;	//!< number of GPS plus GLONASS L1 satellites used in solution
+	uint8_t number_of_satellites_l2;	//!< number of GPS plus GLONASS L2 satellites used in solution
 	uint8_t reserved;					//!< reserved
 	uint8_t extended_solution_status;	//!< extended solution status - OEMV and greater only
-	uint8_t reserved2; 					//!< reserved
-	uint8_t signals_used_mask;			//!< signals used mask - OEMV and greater only
+	uint8_t gal_bds_used_mask; 					//!< reserved
+	uint8_t gps_glo_used_mask;			//!< signals used mask - OEMV and greater only
 	uint8_t crc[4];						//!< 32-bit cyclic redundancy check (CRC)
 });
 
@@ -896,15 +896,15 @@ struct GalInavEphemeris {
 	double OmegaDot;				// rate of right ascension (radians/s)
 	double Cuc;					// amplitude of the cosine harmonic correction term to the argument of latitude (radians)
 	double Cus;					// amplitude of the sine harmonic correction term to the argument of latitude (radians)
-	double Crs;					// amplitude of the cosine harmonic correction term to the orbit radius (m)
-	double Crc;					// amplitude of the sine harmonic correction term to the orbit radius (m)
+	double Crc;					// amplitude of the cosine harmonic correction term to the orbit radius (m)
+	double Crs;					// amplitude of the sine harmonic correction term to the orbit radius (m)
 	double Cic;					// amplitude of the cosine harmonic correction term to the angle of inclination (radians)
 	double Cis;					// amplitude of the sine harmonic correction term to the angle of inclination (radians)
 	double Af0;					// SV clock bias correction coefficient from the F/NAV message (s)
 	double Af1;					// SV clock drift correction coefficient from the F/NAV message (s/s)
 	double Af2;					// SV clock drift rate correction coefficient from the F/NAV message (s/s^2)
 	double E1E5aBGD;				// E1, E5a broadcast group delay
-	double E1E5bGBD;				// E1, E5b broadcast group delay
+	double E1E5bBGD;				// E1, E5b broadcast group delay
 	uint32_t CRC;
 });
 
@@ -936,12 +936,74 @@ struct BdsEphemeris
     double idot;					// rate of inclination angle (radians/s)
     double Cuc;					// amplitude of the cosine harmonic correction term to the argument of latitude (radians)
     double Cus;					// amplitude of the sine harmonic correction term to the argument of latitude (radians)
-    double Crs;					// amplitude of the cosine harmonic correction term to the orbit radius (m)
-    double Crc;					// amplitude of the sine harmonic correction term to the orbit radius (m)
+    double Crc;					// amplitude of the cosine harmonic correction term to the orbit radius (m)
+    double Crs;					// amplitude of the sine harmonic correction term to the orbit radius (m)
     double Cic;					// amplitude of the cosine harmonic correction term to the angle of inclination (radians)
     double Cis;					// amplitude of the sine harmonic correction term to the angle of inclination (radians)
     uint8_t crc[4];                 //!< 32-bit cyclic redundancy check (CRC)
 });
+
+PACK(
+struct QzssEphemeris
+{
+    Oem4BinaryHeader header;
+    uint32_t satid;				// ID/ranging code
+    double tow;
+    uint32_t health;
+    uint32_t IODE1;
+    uint32_t IODE2;
+    uint32_t week;
+    uint32_t z_week;
+    double toe;
+    double A;						// square root of semi-major axis (sqrt(m))
+    double deltaN;				// mean motion difference  (radians/s)
+    double M0;					// mean anomaly at reference time (radians)
+    double ecc;					// eccentricity (unitless)
+    double omega;					// argument of perigee (radians)
+    double Cuc;					// amplitude of the cosine harmonic correction term to the argument of latitude (radians)
+    double Cus;					// amplitude of the sine harmonic correction term to the argument of latitude (radians)
+    double Crc;					// amplitude of the cosine harmonic correction term to the orbit radius (m)
+    double Crs;					// amplitude of the sine harmonic correction term to the orbit radius (m)
+    double Cic;					// amplitude of the cosine harmonic correction term to the angle of inclination (radians)
+    double Cis;					// amplitude of the sine harmonic correction term to the angle of inclination (radians)
+    double i0;					// inclination angle at reference time (radians)
+    double idot;					// rate of inclination angle (radians/s)
+    double omega0;				// Longitude of ascending node of orbital plane (radians)
+    double omegadot;				// rate of right ascension (radians/s)
+    uint32_t IODC;
+    double toc;
+    double tgd;
+    double af0;
+    double af1;
+    double af2;
+    yes_no anti_spoofing;
+    double N;
+    double URA;
+    uint8_t fit_interval;
+    uint8_t reserved;
+    uint8_t reserved2;
+    uint8_t reserved3;
+    uint8_t crc[4];                 //!< 32-bit cyclic redundancy check (CRC)
+});
+
+PACK(
+struct GalClock {
+	Oem4BinaryHeader header;
+	double a0;				// constant term of polynomial (s)
+	double a1;				// 1st order term of polynomial (s/s)
+	int32_t deltaTls;	// leap second count before leap second adjustment
+	uint32_t tot;			// UTC data reference time of week (s)
+	uint32_t WNt;			// UTC data reference week number
+	uint32_t WNlsf;		// week number of leap second adjustment
+	uint32_t DN; 			// day number at the end of which a leap second adjustment becomes effective
+	int32_t deltaTlsf;	// leap second count after leap second adjustment
+	double a0g; 			// constant term of the polynomial describing the difference between galileo and gps time (s)
+	double a1g;			// rate of change of offset the offset between galileo and gps time (s/s)
+	uint32_t t0g; 		// reference time for GGTO data (s)
+	uint32_t WN0g;		// week number of GGTO reference
+	uint8_t crc[4];
+});
+
 /*!
  * RAWEPHEM Message Structure
  * contains the raw binary information for subframes one, two

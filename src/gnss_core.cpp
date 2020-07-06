@@ -8,6 +8,7 @@
 #include "novatel/gnss.h"
 #include "gnss_core.h"
 #include "navutils.h"
+#include <time.h>
 #include <cmath>
 using namespace Eigen;
 using namespace std;
@@ -23,15 +24,13 @@ GnssCore* GnssCore::getInstance(){
 void GnssCore::ProcessRange(double timeRangeHeader){
 	uint16_t i;
 	timeCurrent_ = timeRangeHeader;
+//	clock_t start, end;
+//	start = clock();
+
+	GalClock gc = GNSS::getInstance()->GetGalClock();
 
 	InitializeGnssFilter();
 
-	bool isCN0[NUMBER_OF_SATELLITES];
-	bool isElGood[NUMBER_OF_SATELLITES];
-	for (i=0; i<NUMBER_OF_SATELLITES; i++){
-		isCN0[i] = false;
-		isElGood[i] = false;
-	}
 	numSvForPos_ = 0;
 	for (i=0; i<NUMBER_OF_SATELLITES; i++){
 		if (CheckSvForProcess(i)){
@@ -48,10 +47,6 @@ void GnssCore::ProcessRange(double timeRangeHeader){
 
 			// 위성 El, Az 계산
 			CalcElAz(i);
-			if (svElRad_[i] * R2D > EL_MASK_IN_DEGREE)
-				isGoodForPos_[i] = true;
-			else
-				continue;
 
 			CalcIonoDelay(i);
 
@@ -59,33 +54,25 @@ void GnssCore::ProcessRange(double timeRangeHeader){
 
 			if (USE_SMOOTHING)
 				CalcCarrierSmoothedCode(i);
-
-			// Correction 계산
-//			EstimateCorr(NavSys, NavParam, i);
-			numSvForPos_++;
 		}
-
-		if (svElRad_[i] * R2D > EL_MASK_IN_DEGREE)
-			isElGood[i] = true;
-		if (mCN0_[i] > CN0_MINIMUM)
-			isCN0[i] = true;
-		if (isMeasurementOn_[i] || isCurrentEphemOn_[i])
-		printf("[PRN] %2i\t[EL] %5.2f\t[AZ] %7.2f\t[CN0] %5.2f\t [SCnt] %3i [Flag] %i%i%i%i%i\n",
-				i, svElRad_[i]*R2D, svAzRad_[i]*R2D, mCN0_[i], mCountOnCSC1_[i],
-				isMeasurementOn_[i], isCurrentEphemOn_[i], isEphemHealthGood_[i],
-				isElGood[i], isCN0[i]);
-
 	}
+	CheckSvStatus();
+
+	PrintSvStatus();
+
 	CalcLeastSquaredPosition();
 
 	ClearGnssFilter();
+
+//	end = clock();
+//	double result = (double) (end - start);
+//	printf("time passed :: %f\n", result/CLOCKS_PER_SEC);
 }
 bool GnssCore::CheckSvForProcess(unsigned char i){
 
-	if (isMeasurementOn_[i] &
-		isCurrentEphemOn_[i] &
-		mCN0_[i] > CN0_MINIMUM &
-		isEphemHealthGood_[i])
+	if (isMeasurementOn_[i] == true &&
+			isCurrentEphemOn_[i] == true &&
+			mLockFlag_[i] == false)
 		return true;
 	else
 		return false;
@@ -125,59 +112,37 @@ void GnssCore::InitializeGnssFilter(){
 				mFrequency_[i] 			= FREQ_GLO_L1 + (obsGloL1_[i-INDEX_GLO_MIN].glonass_frequency - 7) * FREQ_GLO_STEP;
 				break;
 			case FLAG_GAL:
-				obsSet						= obsGalE5a_[i-INDEX_GAL_MIN];
-				mFrequency_[i] 			= FREQ_GAL_E5a;
+				obsSet						= obsGalE1_[i-INDEX_GAL_MIN];
+				mFrequency_[i] 			= FREQ_GAL_E1;
 				break;
 			case FLAG_BDS:
 				obsSet 					= obsBdsB1I_[i-INDEX_BDS_MIN];
 				mFrequency_[i] 			= FREQ_BDS_B1I;
 				break;
+			case FLAG_QZS:
+				obsSet						= obsQzsL1CA_[i-INDEX_QZS_MIN];
+				mFrequency_[i]			= FREQ_QZS_L1CA;
+				break;
 			default:
 				break;
 			}
+
 			mCurrentCode_[i] 			= obsSet.pseudorange;
 			mCurrentPhase_[i] 		= obsSet.accumulated_doppler;
 			mCurrentLockTime_[i] 	= obsSet.locktime;
 			mCodeRate_[i]				= mWaveLength_[i] * obsSet.doppler;
 			mCN0_[i]					= obsSet.carrier_to_noise;
 			mWaveLength_[i] 			= SPEED_OF_LIGHT/mFrequency_[i];
-
+			mLockFlag_[i]				= obsSet.channel_status.prn_lock_flag;
 		}
 	}
 } // function: InitializeGnssFilter
 
 void GnssCore::CalcSvClockOffset(unsigned char i){
 	double tk;
+	double f_rel;
 
-	switch (GetConstFlag(i)){
-	case FLAG_GPS:
-		double n0, nk, Mk;
-		double Ek, rel_t;
-		double A, M0, deltaN, ecc, af0, af1, af2, TOC, Tgd;
-
-		A 		= currentGpsEphemerides_[i].semi_major_axis;
-		M0 		= currentGpsEphemerides_[i].anomoly_reference_time;
-		deltaN = currentGpsEphemerides_[i].mean_motion_difference;
-		ecc 	= currentGpsEphemerides_[i].eccentricity;
-		af0 	= currentGpsEphemerides_[i].clock_aligning_param_0;
-		af1 	= currentGpsEphemerides_[i].clock_aligning_param_1;
-		af2 	= currentGpsEphemerides_[i].clock_aligning_param_2;
-		TOC		= currentGpsEphemerides_[i].sv_clock_correction;
-		Tgd 	= currentGpsEphemerides_[i].group_delay_difference;
-
-		tk = timeTxRaw_[i] - TOC;
-
-		// 상대성 효과에 의한 delay
-		n0 = sqrt(MU_WGS84 / (A * A * A));
-		nk = n0 + deltaN;
-		Mk = M0 + nk * tk;
-		KeplerEquation(&Ek, Mk, ecc);
-		rel_t = F_RELATIVE * ecc * sqrt(A) * sin(Ek);
-
-		svClockOffset_[i] = af0 + (af1 * tk) + (af2 * tk * tk) + rel_t - Tgd;
-		svClockDrift_[i]  = af1 + af2 * tk;
-		break;
-	case FLAG_GLO:
+	if (GetConstFlag(i) == FLAG_GLO){
 		double e_time, taun, gamma;
 		e_time = currentGloEphemerides_[i-NUMBER_OF_GPS].e_time;
 		taun 	= currentGloEphemerides_[i-NUMBER_OF_GPS].taun;
@@ -186,10 +151,82 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 		tk = timeTxRaw_[i] - e_time;
 
 		svClockOffset_[i] = -taun + (gamma * tk);
-		break;
-	default:
-		break;
+	} else {
+		double n0, nk, Mk;
+		double Ek, rel_t;
+		double A, M0, deltaN, ecc, af0, af1, af2, TOC, Tgd;
+
+		switch (GetConstFlag(i)){
+		case FLAG_GPS:
+			A 		= currentGpsEphemerides_[i].semi_major_axis;
+			M0 		= currentGpsEphemerides_[i].anomoly_reference_time;
+			deltaN = currentGpsEphemerides_[i].mean_motion_difference;
+			ecc 	= currentGpsEphemerides_[i].eccentricity;
+			af0 	= currentGpsEphemerides_[i].clock_aligning_param_0;
+			af1 	= currentGpsEphemerides_[i].clock_aligning_param_1;
+			af2 	= currentGpsEphemerides_[i].clock_aligning_param_2;
+			TOC		= currentGpsEphemerides_[i].sv_clock_correction;
+			Tgd 	= currentGpsEphemerides_[i].group_delay_difference;
+
+			f_rel	= F_RELATIVE_GPS;
+			break;
+		case FLAG_GAL:
+			A 		= currentGalEphemerides_[i-INDEX_GAL_MIN].RootA * currentGalEphemerides_[i-INDEX_GAL_MIN].RootA;
+			M0 		= currentGalEphemerides_[i-INDEX_GAL_MIN].M0;
+			deltaN = currentGalEphemerides_[i-INDEX_GAL_MIN].DeltaN;
+			ecc 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Ecc;
+			af0 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Af0;
+			af1 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Af1;
+			af2 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Af2;
+			TOC		= currentGalEphemerides_[i-INDEX_GAL_MIN].T0c;
+			Tgd 	= currentGalEphemerides_[i-INDEX_GAL_MIN].E1E5bBGD;
+
+			f_rel	= F_RELATIVE_GAL;
+			break;
+		case FLAG_BDS:
+			A 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].RootA * currentBdsEphemerides_[i-INDEX_BDS_MIN].RootA;
+			M0 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].M0;
+			deltaN = currentBdsEphemerides_[i-INDEX_BDS_MIN].deltaN;
+			ecc 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].ecc;
+			af0 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].a0;
+			af1 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].a1;
+			af2 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].a2;
+			TOC		= currentBdsEphemerides_[i-INDEX_BDS_MIN].toc;
+			Tgd 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].tgd1;
+
+			f_rel	= F_RELATIVE_BDS;
+			break;
+		case FLAG_QZS:
+			A 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].A;
+			M0 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].M0;
+			deltaN = currentQzsEphemerides_[i-INDEX_QZS_MIN].deltaN;
+			ecc 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].ecc;
+			af0 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].af0;
+			af1 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].af1;
+			af2 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].af2;
+			TOC		= currentQzsEphemerides_[i-INDEX_QZS_MIN].toc;
+			Tgd 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].tgd;
+
+			f_rel	= F_RELATIVE_QZS;
+			break;
+		}
+
+		tk = timeTxRaw_[i] - TOC;
+		if (GetConstFlag(i) == FLAG_BDS)
+			tk = tk - 14;
+
+		// 상대성 효과에 의한 delay
+		n0 = sqrt(MU_WGS84 / (A * A * A));
+		nk = n0 + deltaN;
+		Mk = M0 + nk * tk;
+		KeplerEquation(&Ek, Mk, ecc);
+		rel_t = f_rel * ecc * sqrt(A) * sin(Ek);
+
+		svClockOffset_[i] = af0 + (af1 * tk) + (af2 * tk * tk) + rel_t - Tgd;
+		svClockDrift_[i]  = af1 + af2 * tk;
+
 	}
+
 } // function: CalcSvClockOffset
 
 void GnssCore::KeplerEquation(double *Ek, double Mk, double ecc) {
@@ -210,91 +247,20 @@ void GnssCore::KeplerEquation(double *Ek, double Mk, double ecc) {
 
 void GnssCore::CalcSvOrbit(unsigned char i){
 
-	double n0, nk, Mk;
-	double Ek, nuk, phik;
-	double Ekdot, nukdot, ikdot, ukdot, rkdot, omegakdot, xodot, yodot;
-	double A, ecc, w, M0, N, cic, cis, crc, crs, cuc, cus,
-			deltaN, i0, idot, omega0, omegadot, TOE,
-			uk, rk, ik, xo, yo, omegak;
-
 	double tk, xp_temp, yp_temp, zp_temp, tau, xv_temp, yv_temp, zv_temp;
-	double xp, yp, zp, xv, yv, zv, xa, ya, za; // Eph 변수 저장용
-	double step; // step size
-	double n, res; // iteration 횟수, 나머지
-	int s;
-	/* Runge Kutta 변수 */
-	double xp1, xp2, xp3, xp4, yp1, yp2, yp3, yp4, zp1, zp2, zp3, zp4;
-	double xv1, xv2, xv3, xv4, yv1, yv2, yv3, yv4, zv1, zv2, zv3, zv4;
-	double xvd1, xvd2, xvd3, xvd4, yvd1, yvd2, yvd3, yvd4, zvd1, zvd2, zvd3, zvd4;
-	double r, g, h, k;
-	double xpe, ype, zpe, xve, yve, zve, xae, yae, zae;
+	double omegadote_datum, mu_datum;
 
-	switch (GetConstFlag(i)){
-	case FLAG_GPS:
-
-		A 			= currentGpsEphemerides_[i].semi_major_axis;
-		ecc			= currentGpsEphemerides_[i].eccentricity;
-		M0 			= currentGpsEphemerides_[i].anomoly_reference_time;
-		N 			= currentGpsEphemerides_[i].corrected_mean_motion;
-		cic 		= currentGpsEphemerides_[i].inclination_cosine;
-		cis			= currentGpsEphemerides_[i].inclination_sine;
-		crc 		= currentGpsEphemerides_[i].orbit_radius_cosine;
-		crs 		= currentGpsEphemerides_[i].orbit_radius_sine;
-		cuc 		= currentGpsEphemerides_[i].latitude_cosine;
-		cus 		= currentGpsEphemerides_[i].latitude_sine;
-		deltaN 	= currentGpsEphemerides_[i].mean_motion_difference;
-		i0 			= currentGpsEphemerides_[i].inclination_angle;
-		idot 		= currentGpsEphemerides_[i].inclination_angle_rate;
-		omega0 	= currentGpsEphemerides_[i].right_ascension;
-		omegadot 	= currentGpsEphemerides_[i].right_ascension_rate;
-		w 			= currentGpsEphemerides_[i].omega;
-		TOE			= currentGpsEphemerides_[i].time_of_ephemeris;
-
-		tk = timeTx_[i] - TOE;
-
-		n0 = sqrt(MU_WGS84 / (A * A * A));
-		nk = n0 + deltaN;
-		Mk = M0 + nk * tk;
-		KeplerEquation(&Ek, Mk, ecc);
-
-		nuk = atan2(sqrt(1 - ecc * ecc) * sin(Ek) / (1 - ecc * cos(Ek)), (cos(Ek) - ecc) / (1 - ecc * cos(Ek)));
-		phik = nuk + w;
-
-		uk = cus * sin(2*phik) + cuc * cos(2*phik) + phik;
-		rk = crs * sin(2*phik) + crc * cos(2*phik) + A * (1 - ecc * cos(Ek));
-		ik = cis * sin(2*phik) + cic * cos(2*phik) + i0 + idot * tk;
-
-		xo = rk * cos(uk);
-		yo = rk * sin(uk);
-		omegak = omega0 - (OMEGADOT_WGS84 * TOE) + (omegadot - OMEGADOT_WGS84) * tk;
-
-		xp_temp = xo * cos(omegak) - yo * cos(ik) * sin(omegak);
-		yp_temp = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
-		zp_temp = yo * sin(ik);
-
-		Ekdot  =  nk/(1 - ecc * cos(Ek));
-		nukdot =  Ekdot * sqrt(1 - ecc * ecc) / (1 - ecc * cos(Ek));
-		ikdot  =  idot + 2 * nukdot * (cis * cos(2 * phik) - cic * sin(2 * phik));
-		ukdot  =  nukdot + 2 * nukdot * (cus * cos(2 * phik) - cuc * sin(2 * phik));
-		rkdot  =  ecc * A * Ekdot * sin(Ek) + 2 * nukdot * (crs * cos(2 * phik) - crc * sin(2 * phik));
-		omegakdot = omegadot - OMEGADOT_WGS84;
-		xodot  =  rkdot * cos(uk) - rk * ukdot * sin(uk);
-		yodot  =  rkdot * sin(uk) + rk * ukdot * cos(uk);
-
-		// Earth Rotation
-		tau = timeTransit_[i];
-		svPosition_[i][0] =  xp_temp * cos(tau * OMEGADOT_WGS84) + yp_temp * sin(tau * OMEGADOT_WGS84);
-		svPosition_[i][1] = -xp_temp * sin(tau * OMEGADOT_WGS84) + yp_temp * cos(tau * OMEGADOT_WGS84);
-		svPosition_[i][2] =  zp_temp;
-
-		xv_temp =  -xo * omegakdot * sin(omegak) + xodot * cos(omegak) - yodot * sin(omegak) * cos(ik) - yo * (omegakdot * cos(omegak) * cos(ik) - (ikdot) * sin(omegak) * sin(ik));
-		yv_temp =  xo * omegakdot * cos(omegak) + xodot * sin(omegak) + yodot * cos(omegak) * cos(ik) - yo * (omegakdot * sin(omegak) * cos(ik) + (ikdot) * cos(omegak) * sin(ik));
-		zv_temp =  yo * ikdot * cos(ik) + yodot * sin(ik);
-		svVelocity_[i][0] =  xv_temp * cos(tau * OMEGADOT_WGS84) + yv_temp * sin(tau * OMEGADOT_WGS84);
-		svVelocity_[i][1] = -xv_temp * sin(tau * OMEGADOT_WGS84) + yv_temp * cos(tau * OMEGADOT_WGS84);
-		svVelocity_[i][2] =  zv_temp;
-		break;
-	case FLAG_GLO:
+	if (GetConstFlag(i) == FLAG_GLO){
+		double xp, yp, zp, xv, yv, zv, xa, ya, za; // Eph 변수 저장용
+		double step; // step size
+		double n, res; // iteration 횟수, 나머지
+		int s;
+		/* Runge Kutta 변수 */
+		double xp1, xp2, xp3, xp4, yp1, yp2, yp3, yp4, zp1, zp2, zp3, zp4;
+		double xv1, xv2, xv3, xv4, yv1, yv2, yv3, yv4, zv1, zv2, zv3, zv4;
+		double xvd1, xvd2, xvd3, xvd4, yvd1, yvd2, yvd3, yvd4, zvd1, zvd2, zvd3, zvd4;
+		double r, g, h, k;
+		double xpe, ype, zpe, xve, yve, zve, xae, yae, zae;
 
 		xpe = currentGloEphemerides_[i-INDEX_GLO_MIN].posx;
 		ype = currentGloEphemerides_[i-INDEX_GLO_MIN].posy;
@@ -423,27 +389,107 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		svVelocity_[i][0] = xv_temp;
 		svVelocity_[i][1] = yv_temp;
 		svVelocity_[i][2] = zv_temp;
-		break;
 
-	case FLAG_GAL:
-		A 			= currentGalEphemerides_[i-INDEX_GAL_MIN].RootA * currentGalEphemerides_[i-INDEX_GAL_MIN].RootA;
-		ecc			= currentGalEphemerides_[i-INDEX_GAL_MIN].Ecc;
-		M0 			= currentGalEphemerides_[i-INDEX_GAL_MIN].M0;
-		cic 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Cic;
-		cis			= currentGalEphemerides_[i-INDEX_GAL_MIN].Cis;
-		crc 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Crc;
-		crs 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Crs;
-		cuc 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Cuc;
-		cus 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Cus;
-		deltaN 	= currentGalEphemerides_[i-INDEX_GAL_MIN].DeltaN;
-		i0 			= currentGalEphemerides_[i-INDEX_GAL_MIN].I0;
-		idot 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Idot;
-		omega0 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Omega0;
-		omegadot 	= currentGalEphemerides_[i-INDEX_GAL_MIN].OmegaDot;
-		w 			= currentGalEphemerides_[i-INDEX_GAL_MIN].Omega;
-		TOE			= currentGalEphemerides_[i-INDEX_GAL_MIN].T0e;
+	} else {
 
+		double n0, nk, Mk;
+		double Ek, nuk, phik;
+		double Ekdot, nukdot, ikdot, ukdot, rkdot, omegakdot, xodot, yodot;
+		double A, ecc, w, M0, N, cic, cis, crc, crs, cuc, cus,
+				deltaN, i0, idot, omega0, omegadot, TOE,
+				uk, rk, ik, xo, yo, omegak;
+
+		switch (GetConstFlag(i)) {
+		case FLAG_GPS:
+			A 			= currentGpsEphemerides_[i].semi_major_axis;
+			ecc			= currentGpsEphemerides_[i].eccentricity;
+			M0 			= currentGpsEphemerides_[i].anomoly_reference_time;
+			N 			= currentGpsEphemerides_[i].corrected_mean_motion;
+			cic 		= currentGpsEphemerides_[i].inclination_cosine;
+			cis			= currentGpsEphemerides_[i].inclination_sine;
+			crc 		= currentGpsEphemerides_[i].orbit_radius_cosine;
+			crs 		= currentGpsEphemerides_[i].orbit_radius_sine;
+			cuc 		= currentGpsEphemerides_[i].latitude_cosine;
+			cus 		= currentGpsEphemerides_[i].latitude_sine;
+			deltaN 	= currentGpsEphemerides_[i].mean_motion_difference;
+			i0 			= currentGpsEphemerides_[i].inclination_angle;
+			idot 		= currentGpsEphemerides_[i].inclination_angle_rate;
+			omega0 	= currentGpsEphemerides_[i].right_ascension;
+			omegadot 	= currentGpsEphemerides_[i].right_ascension_rate;
+			w 			= currentGpsEphemerides_[i].omega;
+			TOE			= currentGpsEphemerides_[i].time_of_ephemeris;
+
+			mu_datum			= MU_WGS84;
+			omegadote_datum 	= OMEGADOT_WGS84;
+			break;
+		case FLAG_GAL:
+			A 			= currentGalEphemerides_[i-INDEX_GAL_MIN].RootA * currentGalEphemerides_[i-INDEX_GAL_MIN].RootA;
+			ecc			= currentGalEphemerides_[i-INDEX_GAL_MIN].Ecc;
+			M0 			= currentGalEphemerides_[i-INDEX_GAL_MIN].M0;
+			cic 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Cic;
+			cis			= currentGalEphemerides_[i-INDEX_GAL_MIN].Cis;
+			crc 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Crc;
+			crs 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Crs;
+			cuc 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Cuc;
+			cus 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Cus;
+			deltaN 	= currentGalEphemerides_[i-INDEX_GAL_MIN].DeltaN;
+			i0 			= currentGalEphemerides_[i-INDEX_GAL_MIN].I0;
+			idot 		= currentGalEphemerides_[i-INDEX_GAL_MIN].Idot;
+			omega0 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Omega0;
+			omegadot 	= currentGalEphemerides_[i-INDEX_GAL_MIN].OmegaDot;
+			w 			= currentGalEphemerides_[i-INDEX_GAL_MIN].Omega;
+			TOE			= currentGalEphemerides_[i-INDEX_GAL_MIN].T0e;
+
+			mu_datum			= MU_GTRF;
+			omegadote_datum 	= OMEGADOT_GTRF;
+			break;
+		case FLAG_BDS:
+			A 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].RootA * currentBdsEphemerides_[i-INDEX_BDS_MIN].RootA;
+			ecc			= currentBdsEphemerides_[i-INDEX_BDS_MIN].ecc;
+			M0 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].M0;
+			cic 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Cic;
+			cis			= currentBdsEphemerides_[i-INDEX_BDS_MIN].Cis;
+			crc 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Crc;
+			crs 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Crs;
+			cuc 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Cuc;
+			cus 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Cus;
+			deltaN 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].deltaN;
+			i0 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].i0;
+			idot 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].idot;
+			omega0 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].omega0;
+			omegadot 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].omegadot;
+			w 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].omega;
+			TOE			= currentBdsEphemerides_[i-INDEX_BDS_MIN].toe;
+
+			mu_datum			= MU_CGCS2000;
+			omegadote_datum 	= OMEGADOT_CGCS2000;
+			break;
+		case FLAG_QZS:
+			A 			= currentQzsEphemerides_[i-INDEX_QZS_MIN].A;
+			ecc			= currentQzsEphemerides_[i-INDEX_QZS_MIN].ecc;
+			M0 			= currentQzsEphemerides_[i-INDEX_QZS_MIN].M0;
+			cic 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].Cic;
+			cis			= currentQzsEphemerides_[i-INDEX_QZS_MIN].Cis;
+			crc 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].Crc;
+			crs 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].Crs;
+			cuc 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].Cuc;
+			cus 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].Cus;
+			deltaN 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].deltaN;
+			i0 			= currentQzsEphemerides_[i-INDEX_QZS_MIN].i0;
+			idot 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].idot;
+			omega0 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].omega0;
+			omegadot 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].omegadot;
+			w 			= currentQzsEphemerides_[i-INDEX_QZS_MIN].omega;
+			TOE			= currentQzsEphemerides_[i-INDEX_QZS_MIN].toe;
+
+			mu_datum			= MU_WGS84;
+			omegadote_datum 	= OMEGADOT_WGS84;
+			break;
+		}
 		tk = timeTx_[i] - TOE;
+
+		if (GetConstFlag(i) == FLAG_BDS)
+			tk = tk - 14.0;
 
 		n0 = sqrt(MU_WGS84 / (A * A * A));
 		nk = n0 + deltaN;
@@ -459,12 +505,35 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 
 		xo = rk * cos(uk);
 		yo = rk * sin(uk);
-		omegak = omega0 - (OMEGADOT_WGS84 * TOE) + (omegadot - OMEGADOT_WGS84) * tk;
 
-		xp_temp = xo * cos(omegak) - yo * cos(ik) * sin(omegak);
-		yp_temp = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
-		zp_temp = yo * sin(ik);
+		if (GetConstFlag(i) == FLAG_BDS &&
+				(i-INDEX_BDS_MIN < 5 || i-INDEX_BDS_MIN > 57)) { // for GEO Beidou satellites
+			omegak = omega0 + omegadot * tk - OMEGADOT_WGS84 * TOE;
+			double xp_t = xo * cos(omegak) - yo * cos(ik) * sin(omegak);
+			double yp_t = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
+			double zp_t = yo * sin(ik);
 
+			xp_temp = xp_t * cos(tk * OMEGADOT_WGS84) +
+						yp_t * sin(tk * OMEGADOT_WGS84) * cos(-5 * D2R) +
+						zp_t * sin(tk * OMEGADOT_WGS84) * sin(-5 * D2R);
+			yp_temp = xp_t * -sin(tk * OMEGADOT_WGS84) +
+						yp_t * cos(tk * OMEGADOT_WGS84) * cos(-5 * D2R) +
+						zp_t * cos(tk * OMEGADOT_WGS84) * sin(-5 * D2R);
+			zp_temp = yp_t * -sin(-5*D2R) + zp_t * cos(-5*D2R);
+		} else { // GPS/Galileo/QZSS or MEO/IGSO Beidou satellites
+			omegak = omega0 + (omegadot - OMEGADOT_WGS84) * tk - (OMEGADOT_WGS84 * TOE);
+
+			xp_temp = xo * cos(omegak) - yo * cos(ik) * sin(omegak);
+			yp_temp = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
+			zp_temp = yo * sin(ik);
+		}
+		// Earth Rotation
+		tau = timeTransit_[i];
+		svPosition_[i][0] =  xp_temp * cos(tau * OMEGADOT_WGS84) + yp_temp * sin(tau * OMEGADOT_WGS84);
+		svPosition_[i][1] = -xp_temp * sin(tau * OMEGADOT_WGS84) + yp_temp * cos(tau * OMEGADOT_WGS84);
+		svPosition_[i][2] =  zp_temp;
+
+		// velocity
 		Ekdot  =  nk/(1 - ecc * cos(Ek));
 		nukdot =  Ekdot * sqrt(1 - ecc * ecc) / (1 - ecc * cos(Ek));
 		ikdot  =  idot + 2 * nukdot * (cis * cos(2 * phik) - cic * sin(2 * phik));
@@ -474,86 +543,15 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		xodot  =  rkdot * cos(uk) - rk * ukdot * sin(uk);
 		yodot  =  rkdot * sin(uk) + rk * ukdot * cos(uk);
 
-		// Earth Rotation
-		tau = timeTransit_[i];
-		svPosition_[i][0] =  xp_temp * cos(tau * OMEGADOT_WGS84) + yp_temp * sin(tau * OMEGADOT_WGS84);
-		svPosition_[i][1] = -xp_temp * sin(tau * OMEGADOT_WGS84) + yp_temp * cos(tau * OMEGADOT_WGS84);
-		svPosition_[i][2] =  zp_temp;
-
 		xv_temp =  -xo * omegakdot * sin(omegak) + xodot * cos(omegak) - yodot * sin(omegak) * cos(ik) - yo * (omegakdot * cos(omegak) * cos(ik) - (ikdot) * sin(omegak) * sin(ik));
 		yv_temp =  xo * omegakdot * cos(omegak) + xodot * sin(omegak) + yodot * cos(omegak) * cos(ik) - yo * (omegakdot * sin(omegak) * cos(ik) + (ikdot) * cos(omegak) * sin(ik));
 		zv_temp =  yo * ikdot * cos(ik) + yodot * sin(ik);
 		svVelocity_[i][0] =  xv_temp * cos(tau * OMEGADOT_WGS84) + yv_temp * sin(tau * OMEGADOT_WGS84);
 		svVelocity_[i][1] = -xv_temp * sin(tau * OMEGADOT_WGS84) + yv_temp * cos(tau * OMEGADOT_WGS84);
 		svVelocity_[i][2] =  zv_temp;
-		break;
+	};
 
-	case FLAG_BDS:
-		A 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].RootA;
-		ecc			= currentBdsEphemerides_[i-INDEX_BDS_MIN].ecc;
-		M0 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].M0;
-		cic 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Cic;
-		cis			= currentBdsEphemerides_[i-INDEX_BDS_MIN].Cis;
-		crc 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Crc;
-		crs 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Crs;
-		cuc 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Cuc;
-		cus 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].Cus;
-		deltaN 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].deltaN;
-		i0 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].i0;
-		idot 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].idot;
-		omega0 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].omega0;
-		omegadot 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].omegadot;
-		w 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].omega;
-		TOE			= currentBdsEphemerides_[i-INDEX_BDS_MIN].toe;
 
-		tk = timeTx_[i] - TOE;
-
-		n0 = sqrt(MU_WGS84 / (A * A * A));
-		nk = n0 + deltaN;
-		Mk = M0 + nk * tk;
-		KeplerEquation(&Ek, Mk, ecc);
-
-		nuk = atan2(sqrt(1 - ecc * ecc) * sin(Ek) / (1 - ecc * cos(Ek)), (cos(Ek) - ecc) / (1 - ecc * cos(Ek)));
-		phik = nuk + w;
-
-		uk = cus * sin(2*phik) + cuc * cos(2*phik) + phik;
-		rk = crs * sin(2*phik) + crc * cos(2*phik) + A * (1 - ecc * cos(Ek));
-		ik = cis * sin(2*phik) + cic * cos(2*phik) + i0 + idot * tk;
-
-		xo = rk * cos(uk);
-		yo = rk * sin(uk);
-		omegak = omega0 - (OMEGADOT_WGS84 * TOE) + (omegadot - OMEGADOT_WGS84) * tk;
-
-		xp_temp = xo * cos(omegak) - yo * cos(ik) * sin(omegak);
-		yp_temp = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
-		zp_temp = yo * sin(ik);
-
-		Ekdot  =  nk/(1 - ecc * cos(Ek));
-		nukdot =  Ekdot * sqrt(1 - ecc * ecc) / (1 - ecc * cos(Ek));
-		ikdot  =  idot + 2 * nukdot * (cis * cos(2 * phik) - cic * sin(2 * phik));
-		ukdot  =  nukdot + 2 * nukdot * (cus * cos(2 * phik) - cuc * sin(2 * phik));
-		rkdot  =  ecc * A * Ekdot * sin(Ek) + 2 * nukdot * (crs * cos(2 * phik) - crc * sin(2 * phik));
-		omegakdot = omegadot - OMEGADOT_WGS84;
-		xodot  =  rkdot * cos(uk) - rk * ukdot * sin(uk);
-		yodot  =  rkdot * sin(uk) + rk * ukdot * cos(uk);
-
-		// Earth Rotation
-		tau = timeTransit_[i];
-		svPosition_[i][0] =  xp_temp * cos(tau * OMEGADOT_WGS84) + yp_temp * sin(tau * OMEGADOT_WGS84);
-		svPosition_[i][1] = -xp_temp * sin(tau * OMEGADOT_WGS84) + yp_temp * cos(tau * OMEGADOT_WGS84);
-		svPosition_[i][2] =  zp_temp;
-
-		xv_temp =  -xo * omegakdot * sin(omegak) + xodot * cos(omegak) - yodot * sin(omegak) * cos(ik) - yo * (omegakdot * cos(omegak) * cos(ik) - (ikdot) * sin(omegak) * sin(ik));
-		yv_temp =  xo * omegakdot * cos(omegak) + xodot * sin(omegak) + yodot * cos(omegak) * cos(ik) - yo * (omegakdot * sin(omegak) * cos(ik) + (ikdot) * cos(omegak) * sin(ik));
-		zv_temp =  yo * ikdot * cos(ik) + yodot * sin(ik);
-		svVelocity_[i][0] =  xv_temp * cos(tau * OMEGADOT_WGS84) + yv_temp * sin(tau * OMEGADOT_WGS84);
-		svVelocity_[i][1] = -xv_temp * sin(tau * OMEGADOT_WGS84) + yv_temp * cos(tau * OMEGADOT_WGS84);
-		svVelocity_[i][2] =  zv_temp;
-		break;
-
-	default:
-		break;
-	}
 } // function: CalcSvOrbit
 
 void GnssCore::SvMotionEq_GLO(double *xvd, double *yvd, double *zvd, double *xp, double *yp, double *zp,
@@ -578,8 +576,10 @@ unsigned char GnssCore::GetConstFlag(unsigned char i){
 		return FLAG_GLO;
 	else if (i >= INDEX_GAL_MIN && i <= INDEX_GAL_MAX)
 		return FLAG_GAL;
-	else if (i >= INDEX_BDS_MIN && i <= INDEX_BDS_MIN)
+	else if (i >= INDEX_BDS_MIN && i <= INDEX_BDS_MAX)
 		return FLAG_BDS;
+	else if (i >= INDEX_QZS_MIN && i <= INDEX_QZS_MAX)
+		return FLAG_QZS;
 	else
 		return 9;
 
@@ -599,63 +599,61 @@ void GnssCore::CalcElAz(unsigned char i){
 } // function: CalcElAz
 
 void GnssCore::CalcIonoDelay(unsigned char i){
-double R2S = 1/PI;
-double S2R = PI;
+	double R2S = 1/PI;
+	double S2R = PI;
 
-double psi, lat_i, lon_i, lat_u, lon_u, lat_m, t, F;
-double elRad = svElRad_[i];
-double azRad = svAzRad_[i];
-double AMP,PER,x; // sum
-lat_u = usrPositionLLA_[0] * R2S;
-lon_u = usrPositionLLA_[1] * R2S;
+	double psi, lat_i, lon_i, lat_u, lon_u, lat_m, t, F;
+	double elRad = svElRad_[i];
+	double azRad = svAzRad_[i];
+	double AMP,PER,x; // sum
+	lat_u = usrPositionLLA_[0] * R2S;
+	lon_u = usrPositionLLA_[1] * R2S;
 
-psi = 0.0137/(elRad * R2S + 0.11) - 0.022;
+	psi = 0.0137/(elRad * R2S + 0.11) - 0.022;
 
-lat_i = lat_u + psi * cos(azRad);
+	lat_i = lat_u + psi * cos(azRad);
 
-if (lat_i > 0.416)
-	lat_i = 0.416;
-else if (lat_i < -0.416)
-	lat_i = -0.416;
+	if (lat_i > 0.416)
+		lat_i = 0.416;
+	else if (lat_i < -0.416)
+		lat_i = -0.416;
 
-lon_i = lon_u + (psi * sin(azRad) / cos(lat_i * S2R));
-lat_m = lat_i + 0.064 * cos((lon_i - 1.617)*S2R);
+	lon_i = lon_u + (psi * sin(azRad) / cos(lat_i * S2R));
+	lat_m = lat_i + 0.064 * cos((lon_i - 1.617)*S2R);
 
-t = (4.32 * 10000) * lon_i + timeCurrent_;
-t = fmod(t, 86400);
-if (t > 86400)
-	t = t - 86400;
-else if (t < 0)
-	t = t + 86400;
+	t = (4.32 * 10000) * lon_i + timeCurrent_;
+	t = fmod(t, 86400);
+	if (t > 86400)
+		t = t - 86400;
+	else if (t < 0)
+		t = t + 86400;
 
-F = 1 + 16 * pow((0.53 - elRad * R2S),3);
+	F = 1 + 16 * pow((0.53 - elRad * R2S),3);
 
-IonosphericModel ionParams = GNSS::getInstance()->GetIonutc();
-AMP = ionParams.a0
-		+ ionParams.a1 * lat_m
+	IonosphericModel ionParams = GNSS::getInstance()->GetIonutc();
+	AMP = ionParams.a0
+			+ ionParams.a1 * lat_m
 			+ ionParams.a2 * (lat_m * lat_m)
-				+ ionParams.a3 * (lat_m * lat_m * lat_m);
-if (AMP < 0)
-	AMP = 0;
+			+ ionParams.a3 * (lat_m * lat_m * lat_m);
+	if (AMP < 0)
+		AMP = 0;
 
-PER = ionParams.b0
-		+ ionParams.b1 * lat_m
+	PER = ionParams.b0
+			+ ionParams.b1 * lat_m
 			+ ionParams.b2 * (lat_m * lat_m)
-				+ ionParams.b3 * (lat_m * lat_m * lat_m);
-if (PER < 72000)
-	PER = 72000;
+			+ ionParams.b3 * (lat_m * lat_m * lat_m);
+	if (PER < 72000)
+		PER = 72000;
 
-x = 2 * PI * (t - 50400)/PER;
-if (fabs(x) > 1.57)
-	svIonoErr_[i] = SPEED_OF_LIGHT * F * 5e-09;
-else
-	svIonoErr_[i] = SPEED_OF_LIGHT * F * (5e-09 + AMP * (1 - x*x/2 + x*x*x*x/24));
+	x = 2 * PI * (t - 50400)/PER;
+	if (fabs(x) > 1.57)
+		svIonoErr_[i] = SPEED_OF_LIGHT * F * 5e-09;
+	else
+		svIonoErr_[i] = SPEED_OF_LIGHT * F * (5e-09 + AMP * (1 - x*x/2 + x*x*x*x/24));
 
-double alpha;
-if (GetConstFlag(i) == FLAG_GLO){
+	double alpha;
 	alpha = (FREQ_GPS_L1*FREQ_GPS_L1) / (mFrequency_[i] * mFrequency_[i]);
 	svIonoErr_[i] = alpha * svIonoErr_[i];
-}
 
 } //function : CalcIonoDelay
 
@@ -775,10 +773,6 @@ void GnssCore::CalcLeastSquaredPosition() {
 
 	double Norm_dX = 100;
 
-	CheckConstellation();
-//	if (~CheckConstellation) // Set constellation mode
-//			return;
-
 	MatrixXd W = SetErrCovariance();
 	VectorXd drho(numSvForPos_, 1);
 	VectorXd dx(3+numConstForPos_, 1);
@@ -796,74 +790,9 @@ void GnssCore::CalcLeastSquaredPosition() {
 		usrPositionECEF_[0] = usrPositionECEF_[0] + dx(0);
 		usrPositionECEF_[1] = usrPositionECEF_[1] + dx(1);
 		usrPositionECEF_[2] = usrPositionECEF_[2] + dx(2);
-		switch (constMode_) {
-		case GPS:
-			usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
-			break;
-		case GLO:
-			usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
-			break;
-		case GAL:
-			usrGalClockOffset_ = usrGalClockOffset_ + dx(3);
-			break;
-		case BDS:
-			usrBdsClockOffset_ = usrBdsClockOffset_ + dx(3);
-			break;
-		case GPS_GLO:
-			usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
-			usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
-			break;
-		case GPS_GAL:
-			usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
-			usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
-			break;
-		case GPS_BDS:
-			usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
-			usrBdsClockOffset_ = usrBdsClockOffset_ + dx(4);
-			break;
-		case GLO_GAL:
-			usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
-			usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
-			break;
-		case GLO_BDS:
-			usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
-			usrBdsClockOffset_ = usrBdsClockOffset_ + dx(4);
-			break;
-		case GAL_BDS:
-			usrGalClockOffset_ = usrGalClockOffset_ + dx(3);
-			usrBdsClockOffset_ = usrBdsClockOffset_ + dx(4);
-			break;
-		case GPS_GLO_GAL:
-			usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
-			usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
-			usrGalClockOffset_ = usrGalClockOffset_ + dx(5);
-			break;
-		case GPS_GLO_BDS:
-			usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
-			usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
-			usrBdsClockOffset_ = usrBdsClockOffset_ + dx(5);
-			break;
-		case GPS_GAL_BDS:
-			usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
-			usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
-			usrBdsClockOffset_ = usrBdsClockOffset_ + dx(5);
-			break;
-		case GLO_GAL_BDS:
-			usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
-			usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
-			usrBdsClockOffset_ = usrBdsClockOffset_ + dx(5);
-			break;
-		case GPS_GLO_GAL_BDS:
-			usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
-			usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
-			usrGalClockOffset_ = usrGalClockOffset_ + dx(5);
-			usrBdsClockOffset_ = usrBdsClockOffset_ + dx(6);
-			break;
-		default:
-			break;
-		}
 
-		//
+		SetUsrClockOffset(dx);
+
 		Norm_dX = sqrt(dx(0)*dx(0) + dx(1)*dx(1) + dx(2)*dx(2));
 	}
 	double err[3];
@@ -894,14 +823,14 @@ void GnssCore::CalcLeastSquaredPosition() {
 			enu_bp(0), enu_bp(1), enu_bp(2), bp.number_of_satellites_in_solution);
 //	printf(" Error  :: %10.2f %10.2f %10.2f\n",err[0],err[1],err[2]);
 
-	FILE *save_file;
-	char SaveFileName[50];
-	sprintf(SaveFileName, "positionerr.txt");
-
-	save_file = fopen(SaveFileName, "ab");
-	fprintf(save_file, "%f,%f,%f,%f,%f,%f,%f\n",
-			timeCurrent_,enu(0),enu(1),enu(2),enu_bp(0),enu_bp(1),enu_bp(2));
-	fclose (save_file);
+//	FILE *save_file;
+//	char SaveFileName[50];
+//	sprintf(SaveFileName, "positionerr.txt");
+//
+//	save_file = fopen(SaveFileName, "ab");
+//	fprintf(save_file, "%f,%f,%f,%f,%f,%f,%f\n",
+//			timeCurrent_,enu(0),enu(1),enu(2),enu_bp(0),enu_bp(1),enu_bp(2));
+//	fclose (save_file);
 
 } // function: EstimateUsrPos
 
@@ -964,25 +893,49 @@ MatrixXd GnssCore::SetGeomMatrix(){
 			case FLAG_GLO:
 				idxConst = 2;
 				if (constMode_ == GLO || constMode_ == GLO_GAL ||
-						constMode_ == GLO_BDS || constMode_ == GLO_GAL_BDS)
+						constMode_ == GLO_BDS || constMode_ == GLO_QZSS ||
+						constMode_ == GLO_GAL_BDS || constMode_ == GLO_GAL_QZSS ||
+						constMode_ == GLO_BDS_QZSS || constMode_ == GLO_GAL_BDS_QZSS)
 					idxConst = 1;
 				break;
 			case FLAG_GAL:
 				idxConst = 3;
-				if (constMode_ == GAL || constMode_ == GAL_BDS)
+				if (constMode_ == GAL || constMode_ == GAL_BDS ||
+						constMode_ == GAL_QZSS || constMode_ == GAL_BDS_QZSS)
 					idxConst = 1;
 				else if (constMode_ == GPS_GAL || constMode_ == GLO_GAL ||
-						constMode_ == GPS_GAL_BDS || constMode_ == GLO_GAL_BDS)
+						constMode_ == GPS_GAL_BDS || constMode_ == GPS_GAL_QZSS ||
+						constMode_ == GLO_GAL_BDS || constMode_ == GLO_GAL_QZSS ||
+						constMode_ == GPS_GAL_BDS_QZSS || constMode_ == GLO_GAL_BDS_QZSS)
 					idxConst = 2;
 				break;
 			case FLAG_BDS:
 				idxConst = 4;
-				if (constMode_ == BDS)
+				if (constMode_ == BDS || constMode_ == BDS_QZSS)
 					idxConst = 1;
-				else if (constMode_ == GPS_BDS || constMode_ == GLO_BDS || constMode_ == GAL_BDS)
+				else if (constMode_ == GPS_BDS || constMode_ == GLO_BDS ||
+						constMode_ == GAL_BDS || constMode_ == GPS_BDS_QZSS ||
+						constMode_ == GLO_BDS_QZSS || constMode_ == GAL_BDS_QZSS)
 					idxConst = 2;
-				else if (constMode_ == GPS_GLO_BDS || constMode_ == GPS_GAL_BDS ||	constMode_ == GLO_GAL_BDS)
+				else if (constMode_ == GPS_GLO_BDS || constMode_ == GPS_GAL_BDS ||
+						constMode_ == GLO_GAL_BDS || constMode_ == GPS_GLO_BDS_QZSS ||
+						constMode_ == GPS_GAL_BDS_QZSS || constMode_ == GLO_GAL_BDS_QZSS)
 					idxConst = 3;
+				break;
+			case FLAG_QZS:
+				idxConst = 5;
+				if (constMode_ == QZSS)
+					cout << "QZSS must be used with other constellations together" << endl;
+				else if (constMode_ == GPS_QZSS || constMode_ == GLO_QZSS ||
+						constMode_ == GAL_QZSS || constMode_ == BDS_QZSS)
+					idxConst = 2;
+				else if (constMode_ == GPS_GLO_QZSS || constMode_ == GPS_GAL_QZSS ||
+						constMode_ == GPS_BDS_QZSS || constMode_ == GLO_GAL_QZSS ||
+						constMode_ == GLO_BDS_QZSS || constMode_ == GAL_BDS_QZSS)
+					idxConst = 3;
+				else if (constMode_ == GPS_GLO_GAL_QZSS || constMode_ == GPS_GLO_BDS_QZSS ||
+						constMode_ == GPS_GAL_BDS_QZSS || constMode_ == GLO_GAL_BDS_QZSS)
+					idxConst = 4;
 				break;
 			default:
 				break;
@@ -1014,7 +967,6 @@ VectorXd GnssCore::SetResidualVector(){
 			else
 				rangeMeasurement = mCurrentCode_[i];
 
-//			printf("%i %f\n", i, rangeMeasurement);
 			switch (GetConstFlag(i)){
 			case FLAG_GPS:
 				usrClockOffset = usrGpsClockOffset_;
@@ -1028,12 +980,18 @@ VectorXd GnssCore::SetResidualVector(){
 			case FLAG_BDS:
 				usrClockOffset = usrBdsClockOffset_;
 				break;
+			case FLAG_QZS:
+				usrClockOffset = usrQzsClockOffset_;
+				break;
 			default:
 				cout << "INVALID CONSTELLATION FLAG "<< endl;
 				break;
 			}
 			drho(idxSv) = rangeMeasurement + SPEED_OF_LIGHT*svClockOffset_[i]
 							- svTropoErr_[i] - svIonoErr_[i] - (r + usrClockOffset);
+//			printf("%2i %f %f %f %f %f %f\n", i, rangeMeasurement,
+//					SPEED_OF_LIGHT*svClockOffset_[i], svTropoErr_[i], svIonoErr_[i],
+//					r, usrClockOffset);
 			idxSv++;
 
 		}
@@ -1097,10 +1055,13 @@ void GnssCore::ClearGnssFilter(){
 			obsGloL2_[i-INDEX_GLO_MIN] = obsRemoval;
 			break;
 		case FLAG_GAL:
-			obsGalE5a_[i-INDEX_GAL_MIN] = obsRemoval;
+			obsGalE5b_[i-INDEX_GAL_MIN] = obsRemoval;
 			break;
 		case FLAG_BDS:
 			obsBdsB1I_[i-INDEX_BDS_MIN] = obsRemoval;
+			break;
+		case FLAG_QZS:
+			obsQzsL1CA_[i-INDEX_QZS_MIN] = obsRemoval;
 			break;
 		default:
 			break;
@@ -1125,9 +1086,20 @@ void GnssCore::ClearGnssFilter(){
 	}
 }
 
-bool GnssCore::CheckConstellation(){
+bool GnssCore::CheckSvStatus(){
 
 	for (int i = 0; i<NUMBER_OF_SATELLITES; i++){
+
+		if (isMeasurementOn_[i] &&
+				isCurrentEphemOn_[i] &&
+				mLockFlag_[i] == false &&
+				svElRad_[i] * R2D > EL_MASK_IN_DEGREE &&
+				mCN0_[i] > CN0_MINIMUM &&
+				isEphemHealthGood_[i]) {
+			isGoodForPos_[i] = true;
+			numSvForPos_++;
+		}
+
 		switch (GetConstFlag(i)){
 		case FLAG_GPS:
 			if (isGoodForPos_[i])
@@ -1145,15 +1117,215 @@ bool GnssCore::CheckConstellation(){
 			if (isGoodForPos_[i])
 				bdsCapable_ = true;
 			break;
+		case FLAG_QZS:
+			if (isGoodForPos_[i])
+				qzssCapable_ = true;
+			break;
 		}
 	}
-	constMode_ = gpsCapable_ + 2*gloCapable_ + 4*galCapable_ + 8*bdsCapable_;
+	constMode_ = gpsCapable_ + 2*gloCapable_ + 4*galCapable_ + 8*bdsCapable_ + 16*qzssCapable_;
 
-	numConstForPos_ = gpsCapable_ + gloCapable_ + galCapable_ + bdsCapable_;
+	numConstForPos_ = gpsCapable_ + gloCapable_ + galCapable_ + bdsCapable_ + qzssCapable_;
 
 	if (numConstForPos_ > 0)
 		return true;
 	else
 		return false;
 }
+
+void GnssCore::SetUsrClockOffset(VectorXd dx){
+
+	switch (constMode_) {
+	case GPS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		break;
+	case GLO:
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
+		break;
+	case GAL:
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(3);
+		break;
+	case BDS:
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(3);
+		break;
+	case QZSS:
+		cout << "QZSS must be used with other constellations together." << endl;
+		break;
+	case GPS_GLO:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
+		break;
+	case GPS_GAL:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
+		break;
+	case GPS_BDS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(4);
+		break;
+	case GPS_QZSS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(4);
+		break;
+	case GLO_GAL:
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
+		break;
+	case GLO_BDS:
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(4);
+		break;
+	case GLO_QZSS:
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(4);
+		break;
+	case GAL_BDS:
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(3);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(4);
+		break;
+	case GAL_QZSS:
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(3);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(4);
+		break;
+	case BDS_QZSS:
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(3);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(4);
+		break;
+	case GPS_GLO_GAL:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(5);
+		break;
+	case GPS_GLO_BDS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(5);
+		break;
+	case GPS_GLO_QZSS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(5);
+		break;
+	case GPS_GAL_BDS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(5);
+		break;
+	case GPS_GAL_QZSS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(5);
+		break;
+	case GLO_GAL_BDS:
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(5);
+		break;
+	case GLO_GAL_QZSS:
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(5);
+		break;
+	case GLO_BDS_QZSS:
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(4);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(5);
+		break;
+	case GAL_BDS_QZSS:
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(3);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(4);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(5);
+		break;
+	case GPS_GLO_GAL_BDS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(5);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(6);
+		break;
+	case GPS_GLO_GAL_QZSS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(5);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(6);
+		break;
+	case GPS_GAL_BDS_QZSS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(5);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(6);
+		break;
+	case GLO_GAL_BDS_QZSS:
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(3);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(4);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(5);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(6);
+		break;
+	case GPS_GLO_GAL_BDS_QZSS:
+		usrGpsClockOffset_ = usrGpsClockOffset_ + dx(3);
+		usrGloClockOffset_ = usrGloClockOffset_ + dx(4);
+		usrGalClockOffset_ = usrGalClockOffset_ + dx(5);
+		usrBdsClockOffset_ = usrBdsClockOffset_ + dx(6);
+		usrQzsClockOffset_ = usrQzsClockOffset_ + dx(7);
+		break;
+	default:
+		break;
+	}
+}
+
+void GnssCore::PrintSvStatus(){
+
+	bool isCN0[NUMBER_OF_SATELLITES];
+	bool isElGood[NUMBER_OF_SATELLITES];
+	char isused[5];
+	char svtype[5];
+
+	uint8_t i;
+	for (i = 0; i<NUMBER_OF_SATELLITES; i++){
+		if (svElRad_[i] * R2D > EL_MASK_IN_DEGREE)
+			isElGood[i] = true;
+		else
+			isElGood[i] = false;
+
+		if (mCN0_[i] > CN0_MINIMUM)
+			isCN0[i] = true;
+		else
+			isCN0[i] = false;
+
+		if (isElGood[i] == true && isCN0[i] == true &&
+				isMeasurementOn_[i] == true && isCurrentEphemOn_[i] == true)
+			sprintf(isused, "  OK ");
+		else
+			sprintf(isused, "  X  ");
+
+		switch (GetConstFlag(i)){
+		case FLAG_GPS:
+			sprintf(svtype, "GPS ");
+			break;
+		case FLAG_GLO:
+			sprintf(svtype, "GLO ");
+			break;
+		case FLAG_GAL:
+			sprintf(svtype, "GAL ");
+			break;
+		case FLAG_BDS:
+			sprintf(svtype, "BDS ");
+			break;
+		case FLAG_QZS:
+			sprintf(svtype, "QZSS");
+			break;
+		}
+
+		if (isGoodForPos_[i] == true) //|| isCurrentEphemOn_[i])
+			printf("[%s] %2i\t[EL] %5.2f\t[AZ] %7.2f\t[CN0] %5.2f\t [SCnt] %3i [Flag] %i%i%i%i%i\n",
+			svtype, i, svElRad_[i]*R2D, svAzRad_[i]*R2D, mCN0_[i], mCountOnCSC1_[i],
+			isMeasurementOn_[i], isCurrentEphemOn_[i], isEphemHealthGood_[i],
+			isElGood[i], isCN0[i]);
+	//	printf("[%s] %2i\t[EL] %5.2f\t[AZ] %7.2f\t[CN0] %5.2f\t [SCnt] %3i [Used] %s\n",
+	//			svtype, i, svElRad_[i]*R2D, svAzRad_[i]*R2D, mCN0_[i], mCountOnCSC1_[i],
+	//			isused);
+
+
+	}
+}
+
 
