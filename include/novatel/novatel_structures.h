@@ -627,7 +627,7 @@ struct UtmPosition
  * Coordinated parametres (UTC)
  */
 PACK(
-struct IonosphericModel {
+struct IonoModelKlobuchar {
     Oem4BinaryHeader header;				//!< Message header
     double a0; //!< alpha parameter constant term
     double a1; //!< alpha parameter 1st order term
@@ -646,7 +646,21 @@ struct IonosphericModel {
     int32_t dells; //!< delta time due to leap seconds
     int32_t fut_dells; //!< future delta time due to leap seconds
     uint32_t delutc; //!< time difference
-    uint8_t 	crc[4];	//!< 32-bit cyclic redundancy check (CRC)
+    uint8_t crc[4];	//!< 32-bit cyclic redundancy check (CRC)
+});
+
+PACK(
+struct IonoModelNeQuick {
+    Oem4BinaryHeader header;				//!< Message header
+    double Ai0;
+    double Ai1;
+    double Ai2;
+    uint8_t SF1;
+    uint8_t SF2;
+    uint8_t SF3;
+    uint8_t SF4;
+    uint8_t SF5;
+    uint8_t crc[4];	//!< 32-bit cyclic redundancy check (CRC)
 });
 
 /*!

@@ -56,6 +56,7 @@ void GnssCore::ProcessRange(double timeRangeHeader){
 				CalcCarrierSmoothedCode(i);
 		}
 	}
+
 	CheckSvStatus();
 
 	CalcLeastSquaredPosition();
@@ -72,7 +73,8 @@ bool GnssCore::CheckSvForProcess(unsigned char i){
 
 	if (isMeasurementOn_[i] == true &&
 			isCurrentEphemOn_[i] == true &&
-			mLockFlag_[i] == false)
+			mLockFlag_[i] == false &&
+			isEphemHealthGood_[i] == true)
 		return true;
 	else
 		return false;
@@ -274,6 +276,8 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 
 		/* Transmission time 계산 */
 		tk = timeTx_[i] - currentGloEphemerides_[i-INDEX_GLO_MIN].e_time;
+		if (fabs(tk > 15 * 60))
+			return;
 
 //		// Coordinate transformation to an inertial reference frame
 		double thetaG0, thetaGe;
@@ -491,6 +495,9 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		if (GetConstFlag(i) == FLAG_BDS)
 			tk = tk - 14.0;
 
+		if (fabs(tk > 4 * 60 * 60))
+			return;
+
 		n0 = sqrt(mu_datum / (A * A * A));
 		nk = n0 + deltaN;
 		Mk = M0 + nk * tk;
@@ -561,7 +568,6 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 void GnssCore::SvMotionEq_GLO(double *xvd, double *yvd, double *zvd, double *xp, double *yp, double *zp,
 					double *xv, double *yv, double *zv, double *xa, double *ya, double *za){
 	double r, g, h, k;
-
 	r = sqrt((*xp)*(*xp) + (*yp)*(*yp) + (*zp)*(*zp));
 	g = -MU_PZ90 / (r*r*r);
 	h = J2_PZ90 * 1.5 * (A_PZ90 * A_PZ90 / (r*r));
@@ -634,7 +640,7 @@ void GnssCore::CalcIonoDelay(unsigned char i){
 
 	F = 1 + 16 * pow((0.53 - elRad * R2S),3);
 
-	IonosphericModel ionParams = GNSS::getInstance()->GetIonutc();
+	IonoModelKlobuchar ionParams = GNSS::getInstance()->GetIonutc();
 	AMP = ionParams.a0
 			+ ionParams.a1 * lat_m
 			+ ionParams.a2 * (lat_m * lat_m)
@@ -1091,7 +1097,7 @@ bool GnssCore::CheckSvStatus(){
 
 	numConstForPos_ = gpsCapable_ + gloCapable_ + galCapable_ + bdsCapable_ + qzsCapable_;
 
-	if (numConstForPos_ > 0)
+	if (numSvForPos_ >= 3 + numConstForPos_)
 		return true;
 	else
 		return false;
@@ -1240,7 +1246,7 @@ void GnssCore::PrintSvStatus(){
 
 	bool isCN0[NUMBER_OF_SATELLITES];
 	bool isElGood[NUMBER_OF_SATELLITES];
-	char isused[5];
+	char isused[6];
 	char svtype[5];
 
 	uint8_t i;
@@ -1280,7 +1286,7 @@ void GnssCore::PrintSvStatus(){
 		}
 
 		if (isGoodForPos_[i] == true) //|| isCurrentEphemOn_[i])
-			printf("[%s] %2i\t[EL] %5.2f\t[AZ] %7.2f\t[CN0] %5.2f\t [SCnt] %3i [Flag] %i%i%i%i%i\n",
+			printf("[%s] %3i   [EL] %5.2f   [AZ] %7.2f   [CN0] %5.2f    [SCnt] %3i   [Flag] %i%i%i%i%i\n",
 			svtype, i, svElRad_[i]*R2D, svAzRad_[i]*R2D, mCN0_[i], mCountOnCSC1_[i],
 			isMeasurementOn_[i], isCurrentEphemOn_[i], isEphemHealthGood_[i],
 			isElGood[i], isCN0[i]);
@@ -1315,14 +1321,15 @@ void GnssCore::PrintSvStatus(){
 
 	//	printf(" Error  :: %10.2f %10.2f %10.2f\n",err[0],err[1],err[2]);
 
-	//	FILE *save_file;
-	//	char SaveFileName[50];
-	//	sprintf(SaveFileName, "positionerr.txt");
-	//
-	//	save_file = fopen(SaveFileName, "ab");
-	//	fprintf(save_file, "%f,%f,%f,%f,%f,%f,%f\n",
-	//			timeCurrent_,enu(0),enu(1),enu(2),enu_bp(0),enu_bp(1),enu_bp(2));
-	//	fclose (save_file);
+		FILE *save_file;
+		char SaveFileName[50];
+		sprintf(SaveFileName, "positionerr.txt");
+
+		save_file = fopen(SaveFileName, "ab");
+		fprintf(save_file, "%f,%f,%f,%f,%i,%f,%f,%f,%i\n",
+				timeCurrent_,enu(0),enu(1),enu(2),numSvForPos_,
+				enu_bp(0),enu_bp(1),enu_bp(2),bp.number_of_satellites_in_solution);
+		fclose (save_file);
 }
 
 

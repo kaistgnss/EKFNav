@@ -67,7 +67,7 @@ void RunGnssThread(){
 		GNSS::getInstance()->ConfigureLogs("gloephemerisb onchanged");
 	if (USE_GAL) {
 		GNSS::getInstance()->ConfigureLogs("galinavephemerisb onchanged");
-		GNSS::getInstance()->ConfigureLogs("galclockb onchanged");
+//		GNSS::getInstance()->ConfigureLogs("galionb onchanged");
 	}
 	if (USE_BDS)
 		GNSS::getInstance()->ConfigureLogs("bdsephemerisb onchanged");
@@ -283,10 +283,9 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 		index = prn - PRNOFFSET_GPS;
 		GnssCore::getInstance()->currentGpsEphemerides_[index] = msgGpsEphemerisFor1sv;
 		GnssCore::getInstance()->isCurrentEphemOn_[index] = true;
+
 		if (msgGpsEphemerisFor1sv.health == 0)
 			GnssCore::getInstance()->isEphemHealthGood_[index] = true;
-
-		printf("GPS Ephem on : %i\n", index);
 		break;
 
 	case GLOEPHEMB_LOG_TYPE:
@@ -302,7 +301,6 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 
 		if (msgGloEphemerisFor1sv.health < 4)
 			GnssCore::getInstance()->isEphemHealthGood_[prn - 6] = true;
-		// Update Current&Last GLONASS Ephemeris
 		break;
 
 	case GALINAVEPHEMB_LOG_TYPE:
@@ -314,7 +312,9 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 
 		GnssCore::getInstance()->currentGalEphemerides_[index] = msgGalEphemerisFor1sv;
 		GnssCore::getInstance()->isCurrentEphemOn_[prn + 55] = true;
-//		if (msgGalEphemerisFor1sv.E5aHealth == 0)
+
+		printf("%i prn %i \n",index, msgGalEphemerisFor1sv.IODNav);
+		if (msgGalEphemerisFor1sv.E1bDVS == 0 && msgGalEphemerisFor1sv.E1bHealth == 0)
 			GnssCore::getInstance()->isEphemHealthGood_[prn + 55] = true;
 		break;
 
@@ -328,7 +328,8 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 		GnssCore::getInstance()->currentBdsEphemerides_[index] = msgBdsEphemerisFor1sv;
 		GnssCore::getInstance()->isCurrentEphemOn_[prn + 91] = true;
 
-//		if (msgBdsEphemerisFor1sv.health1 == 0)
+		if (msgBdsEphemerisFor1sv.health1 == 0 &&
+				(msgBdsEphemerisFor1sv.AODC < 25 && msgBdsEphemerisFor1sv.AODE < 25))
 			GnssCore::getInstance()->isEphemHealthGood_[prn + 91] = true;
 		break;
 
@@ -342,18 +343,19 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 		GnssCore::getInstance()->currentQzsEphemerides_[index] = msgQzssEphemerisFor1sv;
 		GnssCore::getInstance()->isCurrentEphemOn_[prn - 38] = true;
 
-//		if (msgQzssEphemerisFor1sv.health == 0)
-		GnssCore::getInstance()->isEphemHealthGood_[prn - 38] = true;
+		if (msgQzssEphemerisFor1sv.health == 0)
+			GnssCore::getInstance()->isEphemHealthGood_[prn - 38] = true;
 		break;
 	case GALCLOCKB_LOG_TYPE:
 		memcpy(&msgGalClockb_, message, sizeof(msgGalClockb_));
 		break;
 ///*
 	case IONUTCB_LOG_TYPE:
-		memcpy(&msgIonutcb_,message,sizeof(msgIonutcb_));
+		memcpy(&msgIonutcb_, message, sizeof(msgIonutcb_));
+		break;
 
-//		if (ionospheric_model_callback_)
-//			ionospheric_model_callback_(msgIonutcb_,read_timestamp_);
+	case GALIONOB_LOG_TYPE:
+		memcpy(&msgGalIonob_, message, sizeof(msgGalIonob_));
 		break;
 
 	case BESTVELB_LOG_TYPE:
@@ -1309,15 +1311,12 @@ void GNSS::StopReading() {
 
 void GNSS::ReadSerialPort() {
 	unsigned char buffer[MAX_NOUT_SIZE];
-	static int msg_id;
 	size_t len;
 
 	log_info_("Started read thread.");
 
 	// continuously read data from serial port
 	while (reading_status_) {
-		msg_id = NULL;
-
 		try {
 			// read data
 			//if you have a delay, you should use other size
@@ -1346,9 +1345,6 @@ void GNSS::ReadSerialPort() {
 }
 
 void GNSS::BufferIncomingData(unsigned char *message, unsigned int length) {
-	int msg_id;
-	int count = 0;
-	FILE *fp;
 
 	// add incoming data to buffer
 	for (unsigned int ii = 0; ii < length; ii++) {

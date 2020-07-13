@@ -57,6 +57,7 @@ using namespace gnss;
 #define OMEGADOT_PZ90		(7.292115e-5)		// earth angular rate
 #define FLATTENING_PZ90		(1/298.257222101)	// Flattening
 #define J2_PZ90				(1.0826257e-3)	// second zonal harmonic of the geopotential
+#define C20_PZ90 				(1.08263e-3)
 //#define ECCENTRICITY_PZ90				(sqrt(1 - (1-Flat_PZ90)))
 
 /* about Earth - GTRF (GALILEO) */

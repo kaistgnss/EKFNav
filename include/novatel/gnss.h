@@ -97,7 +97,7 @@ typedef boost::function<void(PositionEcef&, double&)> BestPositionEcefCallback;
 typedef boost::function<void(Dop&, double&)> PseudorangeDopCallback;
 typedef boost::function<void(Dop&, double&)> RtkDopCallback;
 typedef boost::function<void(BaselineEcef&, double&)> BaselineEcefCallback;
-typedef boost::function<void(IonosphericModel&, double&)> IonosphericModelCallback;
+typedef boost::function<void(IonoModelKlobuchar&, double&)> IonosphericModelCallback;
 typedef boost::function<void(RangeMeasurements&, double&)> RangeMeasurementsCallback;
 typedef boost::function<void(CompressedRangeMeasurements&, double&)> CompressedRangeMeasurementsCallback;
 typedef boost::function<void(GpsEphemeris&, double&)> GpsEphemerisCallback;
@@ -339,7 +339,7 @@ public:
     Position GetBestpos(){ return msgBestposb_; }
     PositionEcef GetBestxyz(){ return msgBestxyzb_; }
     double GetTimeBestpos(){ return timeBestposb_; }
-    IonosphericModel GetIonutc(){ return msgIonutcb_; }
+    IonoModelKlobuchar GetIonutc(){ return msgIonutcb_; }
     GalClock GetGalClock() { return msgGalClockb_; }
 
     bool isBestposReady_;
@@ -514,7 +514,9 @@ private:
 	RangeMeasurements 	msgRangeb_;
 	Velocity 				msgBestvelb_;
 	PositionEcef 			msgBestxyzb_;
-	IonosphericModel 		msgIonutcb_;
+	IonoModelKlobuchar	msgIonutcb_;
+	IonoModelNeQuick		msgGalIonob_;
+
 	GalClock				msgGalClockb_;
 	/* Class Declaration :: GnssCore */
 //	GnssCore 				GnssData;
