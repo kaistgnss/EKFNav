@@ -151,12 +151,14 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 		gamma  = currentGloEphemerides_[i-NUMBER_OF_GPS].gamma;
 
 		tk = timeTxRaw_[i] - e_time;
+		if (fabs(tk > FIFTEENMINUTE_SECOND))
+			return;
 
 		svClockOffset_[i] = -taun + (gamma * tk);
 	} else {
 		double n0, nk, Mk;
 		double Ek, rel_t;
-		double A, M0, deltaN, ecc, af0, af1, af2, TOC, Tgd;
+		double A, M0, deltaN, ecc, af0, af1, af2, toc, tgd, mu_datum;
 
 		switch (GetConstFlag(i)){
 		case FLAG_GPS:
@@ -167,10 +169,11 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 			af0 	= currentGpsEphemerides_[i].clock_aligning_param_0;
 			af1 	= currentGpsEphemerides_[i].clock_aligning_param_1;
 			af2 	= currentGpsEphemerides_[i].clock_aligning_param_2;
-			TOC		= currentGpsEphemerides_[i].sv_clock_correction;
-			Tgd 	= currentGpsEphemerides_[i].group_delay_difference;
+			toc		= currentGpsEphemerides_[i].sv_clock_correction;
+			tgd 	= currentGpsEphemerides_[i].group_delay_difference;
 
 			f_rel	= F_RELATIVE_GPS;
+			mu_datum = MU_WGS84;
 			break;
 		case FLAG_GAL:
 			A 		= currentGalEphemerides_[i-INDEX_GAL_MIN].RootA * currentGalEphemerides_[i-INDEX_GAL_MIN].RootA;
@@ -180,10 +183,11 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 			af0 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Af0;
 			af1 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Af1;
 			af2 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Af2;
-			TOC		= currentGalEphemerides_[i-INDEX_GAL_MIN].T0c;
-			Tgd 	= currentGalEphemerides_[i-INDEX_GAL_MIN].E1E5bBGD;
+			toc		= currentGalEphemerides_[i-INDEX_GAL_MIN].T0c;
+			tgd 	= currentGalEphemerides_[i-INDEX_GAL_MIN].E1E5bBGD;
 
 			f_rel	= F_RELATIVE_GAL;
+			mu_datum = MU_GTRF;
 			break;
 		case FLAG_BDS:
 			A 		= currentBdsEphemerides_[i-INDEX_BDS_MIN].RootA * currentBdsEphemerides_[i-INDEX_BDS_MIN].RootA;
@@ -193,10 +197,11 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 			af0 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].a0;
 			af1 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].a1;
 			af2 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].a2;
-			TOC		= currentBdsEphemerides_[i-INDEX_BDS_MIN].toc;
-			Tgd 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].tgd1;
+			toc		= currentBdsEphemerides_[i-INDEX_BDS_MIN].toc;
+			tgd 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].tgd1;
 
 			f_rel	= F_RELATIVE_BDS;
+			mu_datum = MU_CGCS2000;
 			break;
 		case FLAG_QZS:
 			A 		= currentQzsEphemerides_[i-INDEX_QZS_MIN].A;
@@ -206,25 +211,35 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 			af0 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].af0;
 			af1 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].af1;
 			af2 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].af2;
-			TOC		= currentQzsEphemerides_[i-INDEX_QZS_MIN].toc;
-			Tgd 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].tgd;
+			toc		= currentQzsEphemerides_[i-INDEX_QZS_MIN].toc;
+			tgd 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].tgd;
 
 			f_rel	= F_RELATIVE_QZS;
+			mu_datum = MU_WGS84;
 			break;
 		}
 
-		tk = timeTxRaw_[i] - TOC;
+		tk = timeTxRaw_[i] - toc;
 		if (GetConstFlag(i) == FLAG_BDS)
 			tk = tk - 14;
 
+		// For time of week crossover
+		if (tk > HALFWEEK_SECOND)
+			tk -= 2*HALFWEEK_SECOND;
+		else if (tk < -HALFWEEK_SECOND)
+			tk += 2*HALFWEEK_SECOND;
+
+		if (tk > FOURHOUR_SECOND)
+			return;
+
 		// 상대성 효과에 의한 delay
-		n0 = sqrt(MU_WGS84 / (A * A * A));
+		n0 = sqrt(mu_datum / (A * A * A));
 		nk = n0 + deltaN;
 		Mk = M0 + nk * tk;
 		KeplerEquation(&Ek, Mk, ecc);
 		rel_t = f_rel * ecc * sqrt(A) * sin(Ek);
 
-		svClockOffset_[i] = af0 + (af1 * tk) + (af2 * tk * tk) + rel_t - Tgd;
+		svClockOffset_[i] = af0 + (af1 * tk) + (af2 * tk * tk) + rel_t - tgd;
 		svClockDrift_[i]  = af1 + af2 * tk;
 
 	}
@@ -276,7 +291,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 
 		/* Transmission time 계산 */
 		tk = timeTx_[i] - currentGloEphemerides_[i-INDEX_GLO_MIN].e_time;
-		if (fabs(tk > 15 * 60))
+		if (fabs(tk > FIFTEENMINUTE_SECOND))
 			return;
 
 //		// Coordinate transformation to an inertial reference frame
@@ -400,7 +415,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		double Ek, nuk, phik;
 		double Ekdot, nukdot, ikdot, ukdot, rkdot, omegakdot, xodot, yodot;
 		double A, ecc, w, M0, N, cic, cis, crc, crs, cuc, cus,
-				deltaN, i0, idot, omega0, omegadot, TOE,
+				deltaN, i0, idot, omega0, omegadot, toe,
 				uk, rk, ik, xo, yo, omegak;
 
 		switch (GetConstFlag(i)) {
@@ -421,7 +436,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 			omega0 	= currentGpsEphemerides_[i].right_ascension;
 			omegadot 	= currentGpsEphemerides_[i].right_ascension_rate;
 			w 			= currentGpsEphemerides_[i].omega;
-			TOE			= currentGpsEphemerides_[i].time_of_ephemeris;
+			toe			= currentGpsEphemerides_[i].time_of_ephemeris;
 
 			mu_datum			= MU_WGS84;
 			omegadote_datum 	= OMEGADOT_WGS84;
@@ -442,7 +457,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 			omega0 	= currentGalEphemerides_[i-INDEX_GAL_MIN].Omega0;
 			omegadot 	= currentGalEphemerides_[i-INDEX_GAL_MIN].OmegaDot;
 			w 			= currentGalEphemerides_[i-INDEX_GAL_MIN].Omega;
-			TOE			= currentGalEphemerides_[i-INDEX_GAL_MIN].T0e;
+			toe			= currentGalEphemerides_[i-INDEX_GAL_MIN].T0e;
 
 			mu_datum			= MU_GTRF;
 			omegadote_datum 	= OMEGADOT_GTRF;
@@ -463,7 +478,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 			omega0 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].omega0;
 			omegadot 	= currentBdsEphemerides_[i-INDEX_BDS_MIN].omegadot;
 			w 			= currentBdsEphemerides_[i-INDEX_BDS_MIN].omega;
-			TOE			= currentBdsEphemerides_[i-INDEX_BDS_MIN].toe;
+			toe			= currentBdsEphemerides_[i-INDEX_BDS_MIN].toe;
 
 			mu_datum			= MU_CGCS2000;
 			omegadote_datum 	= OMEGADOT_CGCS2000;
@@ -484,18 +499,23 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 			omega0 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].omega0;
 			omegadot 	= currentQzsEphemerides_[i-INDEX_QZS_MIN].omegadot;
 			w 			= currentQzsEphemerides_[i-INDEX_QZS_MIN].omega;
-			TOE			= currentQzsEphemerides_[i-INDEX_QZS_MIN].toe;
+			toe			= currentQzsEphemerides_[i-INDEX_QZS_MIN].toe;
 
 			mu_datum			= MU_WGS84;
 			omegadote_datum 	= OMEGADOT_WGS84;
 			break;
 		}
-		tk = timeTx_[i] - TOE;
-
+		tk = timeTx_[i] - toe;
 		if (GetConstFlag(i) == FLAG_BDS)
 			tk = tk - 14.0;
 
-		if (fabs(tk > 4 * 60 * 60))
+		// For time of week crossover
+		if (tk > HALFWEEK_SECOND)
+			tk -= 2*HALFWEEK_SECOND;
+		else if (tk < -HALFWEEK_SECOND)
+			tk += 2*HALFWEEK_SECOND;
+
+		if (fabs(tk > FOURHOUR_SECOND))
 			return;
 
 		n0 = sqrt(mu_datum / (A * A * A));
@@ -515,7 +535,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 
 		if (GetConstFlag(i) == FLAG_BDS &&
 				(i-INDEX_BDS_MIN < 5 || i-INDEX_BDS_MIN > 57)) { // for GEO Beidou satellites
-			omegak = omega0 + omegadot * tk - OMEGADOT_WGS84 * TOE;
+			omegak = omega0 + omegadot * tk - omegadote_datum * toe;
 			double xp_t = xo * cos(omegak) - yo * cos(ik) * sin(omegak);
 			double yp_t = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
 			double zp_t = yo * sin(ik);
@@ -528,7 +548,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 						zp_t * cos(tk * omegadote_datum) * sin(-5 * D2R);
 			zp_temp = yp_t * -sin(-5*D2R) + zp_t * cos(-5*D2R);
 		} else { // GPS/Galileo/QZSS or MEO/IGSO Beidou satellites
-			omegak = omega0 + (omegadot - omegadote_datum) * tk - (omegadote_datum * TOE);
+			omegak = omega0 + (omegadot - omegadote_datum) * tk - (omegadote_datum * toe);
 
 			xp_temp = xo * cos(omegak) - yo * cos(ik) * sin(omegak);
 			yp_temp = xo * sin(omegak) + yo * cos(ik) * cos(omegak);
@@ -1321,15 +1341,15 @@ void GnssCore::PrintSvStatus(){
 
 	//	printf(" Error  :: %10.2f %10.2f %10.2f\n",err[0],err[1],err[2]);
 
-		FILE *save_file;
-		char SaveFileName[50];
-		sprintf(SaveFileName, "positionerr.txt");
-
-		save_file = fopen(SaveFileName, "ab");
-		fprintf(save_file, "%f,%f,%f,%f,%i,%f,%f,%f,%i\n",
-				timeCurrent_,enu(0),enu(1),enu(2),numSvForPos_,
-				enu_bp(0),enu_bp(1),enu_bp(2),bp.number_of_satellites_in_solution);
-		fclose (save_file);
+//		FILE *save_file;
+//		char SaveFileName[50];
+//		sprintf(SaveFileName, "positionerr.txt");
+//
+//		save_file = fopen(SaveFileName, "ab");
+//		fprintf(save_file, "%f,%f,%f,%f,%i,%f,%f,%f,%i\n",
+//				timeCurrent_,enu(0),enu(1),enu(2),numSvForPos_,
+//				enu_bp(0),enu_bp(1),enu_bp(2),bp.number_of_satellites_in_solution);
+//		fclose (save_file);
 }
 
 

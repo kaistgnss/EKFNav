@@ -90,8 +90,10 @@ using namespace gnss;
 #define FREQ_QZS_L1CA		(1.576420e9)
 
 /* Math */
-#define WEEK_SECOND			(604800)
-#define HALFWEEK_SECOND		(302400)
+#define WEEK_SECOND			(604800.0)
+#define HALFWEEK_SECOND		(302400.0)
+#define FOURHOUR_SECOND		(4 * 3600.0)
+#define FIFTEENMINUTE_SECOND (15*60.0)
 #define PI						(3.1415926535898)
 #define R2D					(180.0/PI)
 #define D2R					(PI/180.0)
