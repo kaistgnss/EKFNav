@@ -36,7 +36,13 @@ using namespace gnss;
 #define USE_QZS (1)
 #define USE_SMOOTHING (0)
 #define EL_MASK_IN_DEGREE	(10)
+
+/* CN0 Monitor */
 #define CN0_MINIMUM			(38.0)
+#define CN0_BAD 				(0)
+#define CN0_BAD2GOOD			(1)
+#define CN0_GOOD 				(2)
+#define CN0_REQUIRED_EPOCH_TO_RETURN	(120)
 
 /* Constants */
 #define EARTH_RADIUS			(6378136.3)  	// m
@@ -189,6 +195,10 @@ private:
 		usrQzsClockOffset_ = 0;
 		std::fill_n(mCountOnCSC1_, NUMBER_OF_SATELLITES, 1);
 		std::fill_n(mCountOnCSC2_, NUMBER_OF_SATELLITES, 1);
+
+		std::fill_n(flagCN0_, NUMBER_OF_SATELLITES, CN0_GOOD);
+		std::fill_n(flagCN0Count_, NUMBER_OF_SATELLITES, 0);
+
 		//		isGpsMeasurementOn_[NUMBER_OF_GPS] = Enumerable.;
 		//		isGloMeasurementOn_[NUMBER_OF_GLO] = false;
 		//		isGpsCurrentEphemOn_[NUMBER_OF_GPS] = false;
@@ -211,6 +221,7 @@ private:
 	void CalcIonoDelay(unsigned char i);
 	void CalcTropoDelay(unsigned char i);
 	void CalcLeastSquaredPosition();
+	void MonitoringCN0();
 	bool CheckSvStatus();
 	MatrixXd SetErrCovariance();
 	MatrixXd SetGeomMatrix();
@@ -247,7 +258,8 @@ private:
 	uint8_t				mCountOnCSC2_[NUMBER_OF_SATELLITES]; // continuous smoothing count
 
 	//	double 				mCSC1_corrected[NUMBER_OF_SATELLITES];
-
+	uint8_t 				flagCN0_[NUMBER_OF_SATELLITES];
+	uint8_t 				flagCN0Count_[NUMBER_OF_SATELLITES];
 
 };
 

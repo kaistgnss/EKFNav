@@ -57,6 +57,8 @@ void GnssCore::ProcessRange(double timeRangeHeader){
 		}
 	}
 
+	MonitoringCN0();
+
 	CheckSvStatus();
 
 	CalcLeastSquaredPosition();
@@ -1076,6 +1078,32 @@ void GnssCore::ClearGnssFilter(){
 	}
 }
 
+void GnssCore::MonitoringCN0(){
+
+	for (int i = 0; i<NUMBER_OF_SATELLITES; i++){
+		if (isMeasurementOn_[i] == false) {
+			flagCN0_[i] = CN0_BAD;
+			continue;
+		}
+
+		if (mCN0_[i] >= CN0_MINIMUM){
+			if (flagCN0_[i] == CN0_BAD)
+				flagCN0_[i] = CN0_BAD2GOOD;
+			else if (flagCN0_[i] == CN0_BAD2GOOD){
+				flagCN0Count_[i]++;
+				if (flagCN0Count_[i] > CN0_REQUIRED_EPOCH_TO_RETURN) {
+					flagCN0_[i] = CN0_GOOD;
+					flagCN0Count_[i] = 0;
+				}
+			}
+		} else {
+			flagCN0_[i] = CN0_BAD;
+			flagCN0Count_[i] = 0;
+		}
+	}
+
+}
+
 bool GnssCore::CheckSvStatus(){
 
 	for (int i = 0; i<NUMBER_OF_SATELLITES; i++){
@@ -1084,7 +1112,7 @@ bool GnssCore::CheckSvStatus(){
 				isCurrentEphemOn_[i] &&
 				mLockFlag_[i] == false &&
 				svElRad_[i] * R2D > EL_MASK_IN_DEGREE &&
-				mCN0_[i] > CN0_MINIMUM &&
+				flagCN0_[i] == CN0_GOOD &&
 				isEphemHealthGood_[i]) {
 			isGoodForPos_[i] = true;
 			numSvForPos_++;
@@ -1305,11 +1333,17 @@ void GnssCore::PrintSvStatus(){
 			break;
 		}
 
-		if (isGoodForPos_[i] == true) //|| isCurrentEphemOn_[i])
-			printf("[%s] %3i   [EL] %5.2f   [AZ] %7.2f   [CN0] %5.2f    [SCnt] %3i   [Flag] %i%i%i%i%i\n",
+		if (isMeasurementOn_[i] &&
+						isCurrentEphemOn_[i] &&
+						mLockFlag_[i] == false &&
+						svElRad_[i] * R2D > EL_MASK_IN_DEGREE &&
+						isEphemHealthGood_[i])
+
+
+//		if (isGoodForPos_[i] == true) //|| isCurrentEphemOn_[i])
+			printf("[%s] %3i   [EL] %5.2f   [AZ] %7.2f   [CN0] %5.2f    [SCnt] %3i   [Flag] %i [FCNT] %i\n",
 			svtype, i, svElRad_[i]*R2D, svAzRad_[i]*R2D, mCN0_[i], mCountOnCSC1_[i],
-			isMeasurementOn_[i], isCurrentEphemOn_[i], isEphemHealthGood_[i],
-			isElGood[i], isCN0[i]);
+			flagCN0_[i], flagCN0Count_[i]);
 	} // for
 
 	double err[3];
@@ -1341,15 +1375,15 @@ void GnssCore::PrintSvStatus(){
 
 	//	printf(" Error  :: %10.2f %10.2f %10.2f\n",err[0],err[1],err[2]);
 
-//		FILE *save_file;
-//		char SaveFileName[50];
-//		sprintf(SaveFileName, "positionerr.txt");
-//
-//		save_file = fopen(SaveFileName, "ab");
-//		fprintf(save_file, "%f,%f,%f,%f,%i,%f,%f,%f,%i\n",
-//				timeCurrent_,enu(0),enu(1),enu(2),numSvForPos_,
-//				enu_bp(0),enu_bp(1),enu_bp(2),bp.number_of_satellites_in_solution);
-//		fclose (save_file);
+		FILE *save_file;
+		char SaveFileName[50];
+		sprintf(SaveFileName, "positionerr.txt");
+
+		save_file = fopen(SaveFileName, "ab");
+		fprintf(save_file, "%f,%f,%f,%f,%i,%f,%f,%f,%i\n",
+				timeCurrent_,enu(0),enu(1),enu(2),numSvForPos_,
+				enu_bp(0),enu_bp(1),enu_bp(2),bp.number_of_satellites_in_solution);
+		fclose (save_file);
 }
 
 
