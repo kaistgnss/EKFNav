@@ -38,7 +38,7 @@ using namespace gnss;
 #define EL_MASK_IN_DEGREE	(10)
 
 /* CN0 Monitor */
-#define CN0_MINIMUM			(38.0)
+#define CN0_MINIMUM			(0)
 #define CN0_BAD 				(0)
 #define CN0_BAD2GOOD			(1)
 #define CN0_GOOD 				(2)
@@ -100,6 +100,7 @@ using namespace gnss;
 #define HALFWEEK_SECOND		(302400.0)
 #define FOURHOUR_SECOND		(4 * 3600.0)
 #define FIFTEENMINUTE_SECOND (15*60.0)
+#define TWENTYMINUTE_SECOND	(20*60.0)
 #define PI						(3.1415926535898)
 #define R2D					(180.0/PI)
 #define D2R					(PI/180.0)

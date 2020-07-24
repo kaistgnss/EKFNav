@@ -153,7 +153,7 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 		gamma  = currentGloEphemerides_[i-NUMBER_OF_GPS].gamma;
 
 		tk = timeTxRaw_[i] - e_time;
-		if (fabs(tk > FIFTEENMINUTE_SECOND))
+		if (fabs(tk) > TWENTYMINUTE_SECOND)
 			return;
 
 		svClockOffset_[i] = -taun + (gamma * tk);
@@ -231,7 +231,7 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 		else if (tk < -HALFWEEK_SECOND)
 			tk += 2*HALFWEEK_SECOND;
 
-		if (tk > FOURHOUR_SECOND)
+		if (fabs(tk) > FOURHOUR_SECOND)
 			return;
 
 		// 상대성 효과에 의한 delay
@@ -293,35 +293,35 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 
 		/* Transmission time 계산 */
 		tk = timeTx_[i] - currentGloEphemerides_[i-INDEX_GLO_MIN].e_time;
-		if (fabs(tk > FIFTEENMINUTE_SECOND))
+		if (fabs(tk) > TWENTYMINUTE_SECOND)
 			return;
 
 //		// Coordinate transformation to an inertial reference frame
-		double thetaG0, thetaGe;
-		unsigned short gps_week;
-		double gps_tow;
-		gps_week = currentGloEphemerides_[i-INDEX_GLO_MIN].e_week;
-		gps_tow = (double) currentGloEphemerides_[i-INDEX_GLO_MIN].e_time;
-		unsigned char utc_offset;
-		utc_offset = 27;
-		double julianDate;
-
-		julianDate = ConvertGPST2JulianDate(gps_week, gps_tow, utc_offset);
-		thetaG0 = ConvertJulianDate2GMST(julianDate);
-
-		thetaGe = thetaG0 + OMEGADOT_PZ90*(gps_tow - 3*3600);
+//		double thetaG0, thetaGe;
+//		unsigned short gps_week;
+//		double gps_tow;
+//		gps_week = currentGloEphemerides_[i-INDEX_GLO_MIN].e_week;
+//		gps_tow = (double) currentGloEphemerides_[i-INDEX_GLO_MIN].e_time;
+//		unsigned char utc_offset;
+//		utc_offset = 27;
+//		double julianDate;
 //
-		xp = xpe * cos(thetaGe) - ype * sin(thetaGe);
-		yp = xpe * sin(thetaGe) + ype * cos(thetaGe);
-		zp = zpe;
-		xv = xve * cos(thetaGe) - yve * sin(thetaGe) - OMEGADOT_PZ90 * yae;
-		yv = xve * sin(thetaGe) + yve * cos(thetaGe) + OMEGADOT_PZ90 * xae;
-		zv = zve;
-		xa = xae * cos(thetaGe) - yae * sin(thetaGe);
-		ya = xae * sin(thetaGe) + yae * cos(thetaGe);
-		za = zae;
+//		julianDate = ConvertGPST2JulianDate(gps_week, gps_tow, utc_offset);
+//		thetaG0 = ConvertJulianDate2GMST(julianDate);
+//
+//		thetaGe = thetaG0 + OMEGADOT_PZ90*(gps_tow - 3*3600);
+////
+//		xp = xpe * cos(thetaGe) - ype * sin(thetaGe);
+//		yp = xpe * sin(thetaGe) + ype * cos(thetaGe);
+//		zp = zpe;
+//		xv = xve * cos(thetaGe) - yve * sin(thetaGe) - OMEGADOT_PZ90 * yae;
+//		yv = xve * sin(thetaGe) + yve * cos(thetaGe) + OMEGADOT_PZ90 * xae;
+//		zv = zve;
+//		xa = xae * cos(thetaGe) - yae * sin(thetaGe);
+//		ya = xae * sin(thetaGe) + yae * cos(thetaGe);
+//		za = zae;
 
-//		xp = xpe; yp = ype; zp = zpe; xv = xve; yv = yve; zv = zve; xa = xae; ya = yae; za = zae;
+		xp = xpe; yp = ype; zp = zpe; xv = xve; yv = yve; zv = zve; xa = xae; ya = yae; za = zae;
 
 		step = 60.0 * tk/fabs(tk); // tk의 부호 반영
 
@@ -384,20 +384,20 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 			zv_temp = zv_temp + (zvd1 + 2*zvd2 + 2*zvd3 + zvd4) * step/6.0;
 		}
 
+//		double xp_tempe, yp_tempe, zp_tempe;
+//		xp_tempe = xp_temp;
+//		yp_tempe = yp_temp;
+//		zp_tempe = zp_temp;
+//		xp_temp = xp_tempe * cos(thetaGe) + yp_tempe * sin(thetaGe);
+//		yp_temp = -xp_tempe * sin(thetaGe) + yp_tempe * cos(thetaGe);
+//		zp_temp = zp_tempe;
+
 		// Earth Rotation
 		tau = timeTransit_[i];
 		xp_temp =  xp_temp * cos(tau * OMEGADOT_PZ90) + yp_temp * sin(tau * OMEGADOT_PZ90);
 		xv_temp =  xv_temp * cos(tau * OMEGADOT_PZ90) + yv_temp * sin(tau * OMEGADOT_PZ90);
 		yp_temp = -xp_temp * sin(tau * OMEGADOT_PZ90) + yp_temp * cos(tau * OMEGADOT_PZ90);
 		yv_temp = -xv_temp * sin(tau * OMEGADOT_PZ90) + yv_temp * cos(tau * OMEGADOT_PZ90);
-
-		double xp_tempe, yp_tempe, zp_tempe;
-		xp_tempe = xp_temp;
-		yp_tempe = yp_temp;
-		zp_tempe = zp_temp;
-		xp_temp = xp_tempe * cos(thetaGe) + yp_tempe * sin(thetaGe);
-		yp_temp = -xp_tempe * sin(thetaGe) + yp_tempe * cos(thetaGe);
-		zp_temp = zp_tempe;
 
 		//	Datum 변환 (PZ-90 to WGS84)
 		svPosition_[i][0] = xp_temp - 0.36;
@@ -517,7 +517,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		else if (tk < -HALFWEEK_SECOND)
 			tk += 2*HALFWEEK_SECOND;
 
-		if (fabs(tk > FOURHOUR_SECOND))
+		if (fabs(tk) > FOURHOUR_SECOND)
 			return;
 
 		n0 = sqrt(mu_datum / (A * A * A));
@@ -1385,5 +1385,3 @@ void GnssCore::PrintSvStatus(){
 				enu_bp(0),enu_bp(1),enu_bp(2),bp.number_of_satellites_in_solution);
 		fclose (save_file);
 }
-
-

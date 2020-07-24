@@ -45,11 +45,16 @@ void RunGnssThread(){
 	GNSS::getInstance()->SendCommand("clockadjust enable", true);
 	GNSS::getInstance()->SendCommand("dynamics auto", true);
 	GNSS::getInstance()->SendCommand("pdpfilter disable", true);
+	GNSS::getInstance()->SendCommand("setionotype Klobuchar", true);
+
+//	GNSS::getInstance()->SendCommand("setionotype AUTO", true);
 	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_GPS);
 	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_GLO);
 	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_GAL);
 	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_BDS);
 	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_QZS);
+
+	GNSS::getInstance()->SetSvElevationAngleCutoff(85.0, FLAG_NIC);
 
 	// required Logs for recording RINEX format
 //	my_gps.ConfigureLogs("versionb once");
@@ -779,6 +784,9 @@ bool GNSS::SetSvElevationAngleCutoff(float angle, CONSTELLATION_FLAG flag) {
 			break;
 		case FLAG_QZS:
 			ang_cmd << "QZSSECUTOFF " << angle;
+			break;
+		case FLAG_NIC:
+			ang_cmd << "NAVICECUTOFF " << angle;
 			break;
 		}
 		return SendCommand(ang_cmd.str());
