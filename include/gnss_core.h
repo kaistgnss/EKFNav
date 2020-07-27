@@ -34,7 +34,7 @@ using namespace gnss;
 #define USE_GAL (1)
 #define USE_BDS (1)
 #define USE_QZS (1)
-#define USE_SMOOTHING (0)
+#define USE_SMOOTHING (1	)
 #define EL_MASK_IN_DEGREE	(10)
 
 /* CN0 Monitor */
