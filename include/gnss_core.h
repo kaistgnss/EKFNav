@@ -232,11 +232,11 @@ private:
 	void CalcElAz(unsigned char i);
 	void CalcIonoDelay(unsigned char i);
 	void CalcTropoDelay(unsigned char i);
-	void CalcLeastSquaredPosition();
+	void CalcLeastSquaredPosVel();
 	void MonitoringCN0();
 	bool CheckSvStatus();
 	MatrixXd SetErrCovariance();
-	MatrixXd SetGeomMatrix(uint8_t posvel);
+	MatrixXd SetGeomMatrix();
 	VectorXd SetResidualVectorPos();
 	VectorXd SetResidualVectorVel();
 

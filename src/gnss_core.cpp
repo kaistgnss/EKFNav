@@ -61,7 +61,7 @@ void GnssCore::ProcessRange(double timeRangeHeader){
 
 	CheckSvStatus();
 
-	CalcLeastSquaredPosition();
+	CalcLeastSquaredPosVel();
 
 	PrintSvStatus();
 
@@ -819,7 +819,7 @@ void GnssCore::CalcCarrierSmoothedCode(unsigned char i){
 	mCurrentCSC2_[i] = csc2;
 } // function: EstimateCSC
 
-void GnssCore::CalcLeastSquaredPosition() {
+void GnssCore::CalcLeastSquaredPosVel() {
 
 	double normalized_dpos = 100;
 	double normalized_dvel = 100;
@@ -828,11 +828,11 @@ void GnssCore::CalcLeastSquaredPosition() {
 	VectorXd drho(numSvForPos_, 1);
 	VectorXd dx(3+numConstForPos_, 1);
 
-//	// Calculate Position
+	// Position (ECEF) estimation
 	int iter = 0;
 	while(normalized_dpos > 0.0001) {
 		iter++;
-		MatrixXd G = SetGeomMatrix(POS);
+		MatrixXd G = SetGeomMatrix();
 		MatrixXd S = (G.transpose()*W*G).inverse() * G.transpose() * W;
 		VectorXd drho = SetResidualVectorPos();
 
@@ -847,9 +847,11 @@ void GnssCore::CalcLeastSquaredPosition() {
 		normalized_dpos = sqrt(dx(0)*dx(0) + dx(1)*dx(1) + dx(2)*dx(2));
 	}
 
+	// Velocity (ECEF) estimation
 	iter = 0;
 	while(normalized_dvel > 0.0001) {
-		MatrixXd G = SetGeomMatrix(VEL);
+		iter++;
+		MatrixXd G = SetGeomMatrix();
 		MatrixXd S = (G.transpose()*W*G).inverse() * G.transpose() * W;
 		drho = SetResidualVectorVel();
 
@@ -899,7 +901,7 @@ MatrixXd GnssCore::SetErrCovariance(){
 	return W;
 }
 
-MatrixXd GnssCore::SetGeomMatrix(uint8_t posvel){
+MatrixXd GnssCore::SetGeomMatrix(){
 
 	MatrixXd G = MatrixXd::Constant(numSvForPos_,3+numConstForPos_,0);
 
@@ -1067,19 +1069,12 @@ VectorXd GnssCore::SetResidualVectorVel(){
 				break;
 			}
 
-//			pred_meas   = dx/r * ((svVelocity_[i][0] - OMEGADOT_WGS84 * svPosition_[i][1]) -
-//								(usrVelocityECEF_[0] - OMEGADOT_WGS84 * usrPositionECEF_[1])) +
-//							dy/r * (svVelocity_[i][1] + OMEGADOT_WGS84 * svPosition_[i][0]) -
-//								(usrVelocityECEF_[1] + OMEGADOT_WGS84 * usrPositionECEF_[0]) +
-//							dz/r * (svVelocity_[i][2] - usrVelocityECEF_[2]) ;
 			pred_meas   = dx/r * (svVelocity_[i][0] - usrVelocityECEF_[0]) +
 							dy/r * (svVelocity_[i][1] - usrVelocityECEF_[1]) +
 							dz/r * (svVelocity_[i][2] - usrVelocityECEF_[2]);
 
 			drho(idxSv) = rangeRateMeasurement - (pred_meas + usrClockDrift);
 
-			printf("%2i %f %f %f %f\n", i, rangeRateMeasurement, pred_meas,
-					svVelocity_[i][0], usrVelocityECEF_[0]);
 			idxSv++;
 		}
 	}
