@@ -372,8 +372,8 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 
 	case BESTXYZB_LOG_TYPE:
 		memcpy(&msgBestxyzb_, message, sizeof(msgBestxyzb_));
-		if (best_position_ecef_callback_)
-			best_position_ecef_callback_(msgBestxyzb_, read_timestamp_);
+//		if (best_position_ecef_callback_)
+//			best_position_ecef_callback_(msgBestxyzb_, read_timestamp_);
 		break;
 	}
 }

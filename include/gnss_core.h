@@ -34,7 +34,7 @@ using namespace gnss;
 #define USE_GAL (1)
 #define USE_BDS (1)
 #define USE_QZS (1)
-#define USE_SMOOTHING (1	)
+#define USE_SMOOTHING (0)
 #define EL_MASK_IN_DEGREE	(10)
 
 /* CN0 Monitor */
@@ -141,6 +141,9 @@ using namespace gnss;
 #define kTwoFilterLenth			(2*kSmoothLen)   //=400pnts = 200sec
 #define kTwoFilterLenth2			(2*kSmoothLen2)   //=60pnts = 30sec
 
+#define POS			(1)
+#define VEL			(1)
+
 class GnssCore {
 public:
 	double svElRad_[NUMBER_OF_SATELLITES];
@@ -150,8 +153,11 @@ public:
 	double svPosition_[NUMBER_OF_SATELLITES][3]; // x,y,z in ECEF frame
 	double svVelocity_[NUMBER_OF_SATELLITES][3]; // x,y,z vel in ECEF
 	double usrPositionECEF_[3], usrPositionLLA_[3];
+	double usrVelocityECEF_[3], usrVelocityENU_[3];
 	double usrBestposECEF_[3], usrBestposLLA_[3];
+	double usrBestvelECEF_[3], usrBestvelENU_[3];
 	double usrGpsClockOffset_, usrGloClockOffset_, usrGalClockOffset_, usrBdsClockOffset_, usrQzsClockOffset_;
+	double usrGpsClockDrift_, usrGloClockDrift_, usrGalClockDrift_, usrBdsClockDrift_, usrQzsClockDrift_;
 	double svIonoErr_[NUMBER_OF_SATELLITES];
 	double svTropoErr_[NUMBER_OF_SATELLITES];
 
@@ -194,6 +200,11 @@ private:
 		usrGalClockOffset_ = 0;
 		usrBdsClockOffset_ = 0;
 		usrQzsClockOffset_ = 0;
+		usrGpsClockDrift_ = 0;
+		usrGloClockDrift_ = 0;
+		usrGalClockDrift_ = 0;
+		usrBdsClockDrift_ = 0;
+		usrQzsClockDrift_ = 0;
 		std::fill_n(mCountOnCSC1_, NUMBER_OF_SATELLITES, 1);
 		std::fill_n(mCountOnCSC2_, NUMBER_OF_SATELLITES, 1);
 
@@ -225,9 +236,12 @@ private:
 	void MonitoringCN0();
 	bool CheckSvStatus();
 	MatrixXd SetErrCovariance();
-	MatrixXd SetGeomMatrix();
-	VectorXd SetResidualVector();
+	MatrixXd SetGeomMatrix(uint8_t posvel);
+	VectorXd SetResidualVectorPos();
+	VectorXd SetResidualVectorVel();
+
 	void SetUsrClockOffset(VectorXd dx);
+	void SetUsrClockDrift(VectorXd dx);
 	void ClearGnssFilter();
 	void PrintSvStatus();
 
