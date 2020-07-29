@@ -3,6 +3,16 @@ cmake_minimum_required (VERSION 2.6)
 project (EKFNav)
 
 #######################################
+## Eigen3 ##
+#######################################
+
+find_package(Eigen3 REQUIRED)
+MESSAGE( [Main] " EIGEN3_INCLUDE_DIRS = ${EIGEN3_INCLUDE_DIRS}") 
+# EIGEN3_INCLUDE_DIRS = /usr/include/eigen3
+
+include_directories(${EIGEN3_INCLUDE_DIRS})
+
+#######################################
 ## Check for ROS ##
 #######################################
 
@@ -60,8 +70,8 @@ endif ()
 # Declare a cpp library
 
 add_library(${LIB_NAME}
-  src/novatel.cpp	src/signa_core.cpp	src/matops.c
-  src/HgDataParser.cpp	src/Serial.cpp       
+  src/gnss.cpp src/gnss_core.cpp src/navutils.cpp
+  src/HgDataParser.cpp	src/Serial.cpp	src/LCEKF.cpp	src/filter_functions.cpp       
 )
 
 
