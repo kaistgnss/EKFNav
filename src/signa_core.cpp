@@ -144,7 +144,7 @@ void SIGNA_core(OEM4_RANGEB_MSG *msg, NavEphData *NavEph){
 	//EstimateIonoTropo(&NavSys, &NavParam);
 
 	//if (NavSys.NumSvGPS > 6)
-	//	EstimateUsrPos(&NavSys, &NavParam);
+		EstimateUsrPos(&NavSys, &NavParam);
 
 	//printf("\n dw :: %f %f %f \n", NavSys.UsrPos_ECEF[0], NavSys.UsrPos_ECEF[1], NavSys.UsrPos_ECEF[2]);
 
