@@ -39,7 +39,7 @@ void LCEKF::Initialization(Vector3d Meas_omega_ib_b, Vector3d Meas_f_ib_b, Vecto
   // Initialize Position and Velocity
   Est_r_eb_e_ = Meas_r_eb_e; // Position in ECEF (m)
   Est_v_eb_e_ = Meas_v_eb_e; // Velocity in ECEF (m/s)
-  //printf("initial Pos : %8.6f, %8.6f, %8.6f, initial Vel : %8.6f, %8.6f, %8.6f \n",Est_r_eb_e_(0), Est_r_eb_e_(1), Est_r_eb_e_(2), Est_v_eb_e_(0), Est_v_eb_e_(1), Est_v_eb_e_(2));
+
   // Initialize sensor biases
   Est_IMUwBias_ = Meas_omega_ib_b;
   Est_IMUaBias_.setZero();
@@ -58,7 +58,7 @@ void LCEKF::Initialization(Vector3d Meas_omega_ib_b, Vector3d Meas_f_ib_b, Vecto
   if (!is_dualheading)
 	  cout << "\n No dualheading data" << endl;
 
-  Est_att_euler_(2) = dualheading/180*M_PI;
+  Est_att_euler_(2) = dualheading;
 
   // Euler to quaternion
   Est_att_quat_ = Euler2Quat(Est_att_euler_);
@@ -68,6 +68,11 @@ void LCEKF::Initialization(Vector3d Meas_omega_ib_b, Vector3d Meas_f_ib_b, Vecto
 }
 
 void LCEKF::Update(double t_gnss, double t_ins, Vector3d Meas_omega_ib_b, Vector3d Meas_f_ib_b, Vector3d Meas_r_eb_e, Vector3d Meas_v_eb_e, Vector3d Bestpos_ECEF_SD, Vector3d Bestvel_ECEF_SD, double dualheading, bool is_dualheading) {
+  Meas_f_ib_b_ = Meas_f_ib_b;
+  Meas_omega_ib_b_ = Meas_omega_ib_b;
+  t_gnss_ = t_gnss;
+  t_ins_ = t_ins;
+
   // A-priori accel and rotation rate estimate
   Est_f_ib_b_ = Meas_f_ib_b - Est_IMUaBias_;
   Est_omega_ib_b_ = Meas_omega_ib_b - Est_IMUwBias_;
@@ -81,24 +86,8 @@ void LCEKF::Update(double t_gnss, double t_ins, Vector3d Meas_omega_ib_b, Vector
   // Gps measurement update, if TOW increased
   if ((t_gnss - t_gnss_prev_) > 0) {
     t_gnss_prev_ = t_gnss;
-
-    // Covariance of the Observation Noise (associated with MeasUpdate())
-     Matrix<double,3,1> pNoise_NED;
-     pNoise_NED(0,0) = pNoisesigma_NE;
-     pNoise_NED(1,0) = pNoisesigma_NE;
-     pNoise_NED(2,0) = pNoisesigma_D;
-
-     Matrix<double,3,1> vNoise_NED;
-     vNoise_NED(0,0) = vNoisesigma_NE;
-     vNoise_NED(1,0) = vNoisesigma_NE;
-     vNoise_NED(2,0) = vNoisesigma_D;
-     Vector3d p_LLA = E2D(Est_r_eb_e_);
-     Matrix3d Est_C_ECEF2NED = TransE2NED(p_LLA);
-     Matrix<double,3,1> pNoise_ECEF = Est_C_ECEF2NED.transpose() * pNoise_NED;
-     Matrix<double,3,1> vNoise_ECEF = Est_C_ECEF2NED.transpose() * vNoise_NED;
-
-     Vector3d pos_NED_SD = Est_C_ECEF2NED * Bestpos_ECEF_SD;
-     Vector3d vel_NED_SD = Est_C_ECEF2NED * Bestvel_ECEF_SD;
+    Meas_r_eb_e_ = Meas_r_eb_e;
+    Meas_v_eb_e_ = Meas_v_eb_e;
 
     R_matrix_(0,0) = Bestvel_ECEF_SD(0) * Bestvel_ECEF_SD(0);
     R_matrix_(1,1) = Bestvel_ECEF_SD(1) * Bestvel_ECEF_SD(1);
@@ -169,21 +158,18 @@ void LCEKF::System_Update() {
 	  Matrix<double,3,3> F; F = Est_ECEF * Est_ECEF.transpose();
 
 	  Vector3d Est_f_ib_e = - Est_C_NED2ECEF * (Est_C_B2NED * Est_f_ib_b_);
-///*
+
 	  // Assemble the Jacobian (state update matrix)
 	  Matrix<double,15,15> Fs; Fs.setZero();
 	  Fs.block(6,3,3,3) = I3;
 	  Fs.block(3,6,3,3) = 2 * g0 / (R_geo * mag_r * mag_r) * F;
-	  //Fs.block(3,0,3,3) = Skew(Est_f_ib_e);
 	  Fs.block(3,0,3,3) = -2.0 * Est_C_NED2ECEF * Est_C_B2NED * Skew(Est_f_ib_b_); // change
-	  //Fs.block(3,9,3,3) = Est_C_NED2ECEF * Est_C_B2NED;
 	  Fs.block(3,9,3,3) = -Est_C_NED2ECEF * Est_C_B2NED;
 	  Fs.block(3,3,3,3) = -2 * Skew(Omega_ie);
 	  Fs.block(0,0,3,3) = -Skew(Est_omega_ib_b_);
 	  Fs.block(0,12,3,3) = -0.5 * I3;
 	  Fs.block(9,9,3,3) = -1.0 / aMarkovTau_s * I3;
 	  Fs.block(12,12,3,3) = -1.0 / wMarkovTau_s * I3;
-//*/
 
 	  // State Transition Matrix
 	  Matrix<double,15,15> PHI_matrix = I15 + Fs * dt_s_;
@@ -204,6 +190,7 @@ void LCEKF::System_Update() {
 	  P_matrix_ = 0.5 * (P_matrix_ + P_matrix_.transpose());
 
 	  num_ins_ ++;
+	  SystemSaveStatus();
 }
 
 // Measurement Update
@@ -264,9 +251,6 @@ void LCEKF::Measurement_Update(Vector3d Meas_r_eb_e, Vector3d Meas_v_eb_e, doubl
 
   	Vector3d pDeltaEst_NED = Est_C_ECEF2NED * pDeltaEst_ECEF;
 
-  	//pDeltaESt_NED(2) = 0;
-  	//pDeltaEst_ECEF = Est_C_ECEF2NED.transpose() * pDeltaESt_NED;
-
   	// Position update
   	Est_r_eb_e_ += pDeltaEst_ECEF;
 
@@ -278,7 +262,7 @@ void LCEKF::Measurement_Update(Vector3d Meas_r_eb_e, Vector3d Meas_v_eb_e, doubl
   	Est_att_quat_ = (Est_att_quat_ * dQuat).normalized();
   	if (is_dualheading){
   		Est_att_euler_ = Quat2Euler(Est_att_quat_);
-  		Est_att_euler_(2) = dualheading/180*M_PI;
+  		Est_att_euler_(2) = dualheading;
   		Est_att_quat_ = Euler2Quat(Est_att_euler_);
   	}
   	if (Est_att_quat_.w() < 0) {
@@ -289,12 +273,165 @@ void LCEKF::Measurement_Update(Vector3d Meas_r_eb_e, Vector3d Meas_v_eb_e, doubl
   	Est_IMUaBias_ += aBiasDelta;
   	Est_IMUwBias_ += wBiasDelta;
   	}
-
   num_gnss_ ++;
+
+  PrintStatus();
+
+  if (is_dualheading)
+	printf("Dualheading angle : %8.6f \n", dualheading/M_PI*180);
+
+  MeasSaveStatus();
   }
 
 void LCEKF::PrintStatus() {
-	printf("Est Pos : %8.6f, %8.6f, %8.6f, Est Vel : %8.6f, %8.6f, %8.6f \n",Est_r_eb_e_(0), Est_r_eb_e_(1), Est_r_eb_e_(2), Est_v_eb_e_(0), Est_v_eb_e_(1), Est_v_eb_e_(2));
-	printf("System update delta t : %2.8f Num INS : %d, Num GNSS : %d \n",dt_s_,num_ins_,num_gnss_);
+	printf("Est Pos : %8.6f, %8.6f, %8.6f,Real Pos : %8.6f, %8.6f, %8.6f, Est Vel : %8.6f, %8.6f, %8.6f \n",Est_r_eb_e_(0), Est_r_eb_e_(1), Est_r_eb_e_(2), Meas_r_eb_e_(0), Meas_r_eb_e_(1), Meas_r_eb_e_(2), Est_v_eb_e_(0), Est_v_eb_e_(1), Est_v_eb_e_(2));
+	printf("Att : %8.6f, %8.6f, %8.6f, System update delta t : %2.8f Num INS : %d, Num GNSS : %d \n \n \n", Est_att_euler_(0)/M_PI*180, Est_att_euler_(1)/M_PI*180, Est_att_euler_(2)/M_PI*180, dt_s_,num_ins_,num_gnss_);
 }
+
+void LCEKF::SystemSaveStatus() {
+	fstream imudataFile;
+	fstream covFile;
+	fstream stateFile;
+	string buffer;
+
+	imudataFile.open("Output_imu.txt",ios::app);
+	covFile.open("Covariance.txt",ios::app);
+	stateFile.open("State.txt",ios::app);
+
+	for (i=0; i<3; i++)  {
+		imudataFile << Meas_f_ib_b_(i);
+		imudataFile << ",";
+	}
+
+	for (i=0; i<3; i++)  {
+		imudataFile << Meas_omega_ib_b_(i);
+		imudataFile << ",";
+	}
+
+	covFile << "IMU";
+	for (i=0; i<15; i++){
+		covFile << ",";
+		covFile << setprecision(4) << P_matrix_(i, i);
+	}
+
+	stateFile << "IMU,";
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(6) << Est_att_euler_(i)/M_PI*180;
+		stateFile << ",";
+	}
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(6) << Est_v_eb_e_(i);
+		stateFile << ",";
+	}
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(12) << Est_r_eb_e_(i);
+		stateFile << ",";
+	}
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(4) << Est_IMUaBias_(i);
+		stateFile << ",";
+	}
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(4) << Est_IMUwBias_(i);
+		stateFile << ",";
+	}
+
+	stateFile << dt_s_;
+	stateFile << ",";
+
+	stateFile << setprecision(12) << t_gnss_;
+
+	imudataFile << "\n";
+	covFile << "\n";
+	stateFile << "\n";
+
+	imudataFile.close();
+	covFile.close();
+	stateFile.close();
+}
+
+void LCEKF::MeasSaveStatus() {
+	fstream stateFile;
+	fstream covFile;
+	fstream truePFile;
+
+	stateFile.open("State.txt",ios::app);
+	covFile.open("Covariance.txt",ios::app);
+	truePFile.open("True_Position.txt",ios::app);
+
+	covFile << "GNSS";
+	for (i=0; i<15; i++){
+		covFile << ",";
+		covFile << setprecision(4) << P_matrix_(i, i);
+	}
+
+	stateFile << "GNSS,";
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(6) << Est_att_euler_(i)/M_PI*180;
+		stateFile << ",";
+	}
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(6) << Est_v_eb_e_(i);
+		stateFile << ",";
+	}
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(12) << Est_r_eb_e_(i);
+		stateFile << ",";
+	}
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(4) << Est_IMUaBias_(i);
+		stateFile << ",";
+	}
+
+	for (i=0; i<3; i++){
+		stateFile << setprecision(4) << Est_IMUwBias_(i);
+		stateFile << ",";
+	}
+
+	stateFile << dt_s_;
+	stateFile << ",";
+	stateFile << setprecision(12) << t_gnss_;
+
+	for (i=0;i<3;i++){
+		truePFile << setprecision(12) << Meas_r_eb_e_(i);
+		truePFile << ",";
+	}
+
+	Vector3d pos_lla = E2D(Meas_r_eb_e_);
+	for (i=0;i<3;i++){
+		truePFile << setprecision(12) << pos_lla(i);
+		truePFile << ",";
+	}
+
+	for (i=0;i<3;i++){
+		truePFile << setprecision(12) << Meas_v_eb_e_(i);
+		truePFile << ",";
+	}
+
+	for (i=0;i<6;i++){
+		truePFile << setprecision(12) << R_matrix_(i,i);
+		truePFile << ",";
+	}
+
+	covFile << "\n";
+	stateFile << "\n";
+	truePFile << "\n";
+
+	stateFile.close();
+	covFile.close();
+	truePFile.close();
+}
+
+
+
+
 

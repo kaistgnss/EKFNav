@@ -38,6 +38,7 @@ public:
 	double acc[3];
 	double gyro[3];
 	double time;
+	int num=0;
 
 	struct HG4930StatusWord
 	{

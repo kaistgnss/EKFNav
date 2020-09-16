@@ -43,9 +43,11 @@ void RunGnssThread(){
 	}
 
 	GNSS::getInstance()->SendCommand("clockadjust enable", true);
-	GNSS::getInstance()->SendCommand("dynamics auto", true);
+	//GNSS::getInstance()->SendCommand("dynamics auto", true);
 	GNSS::getInstance()->SendCommand("pdpfilter disable", true);
 	GNSS::getInstance()->SendCommand("setionotype Klobuchar", true);
+	GNSS::getInstance()->SendCommand("PDPFILTER enable", true);
+	GNSS::getInstance()->SendCommand("PDPMODE normal auto", true);
 
 //	GNSS::getInstance()->SendCommand("setionotype AUTO", true);
 	GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_GPS);
@@ -54,7 +56,7 @@ void RunGnssThread(){
 	//GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_BDS);
 	//GNSS::getInstance()->SetSvElevationAngleCutoff(5.0, FLAG_QZS);
 
-	GNSS::getInstance()->SetSvElevationAngleCutoff(85.0, FLAG_NIC);
+	//GNSS::getInstance()->SetSvElevationAngleCutoff(85.0, FLAG_NIC);
 
 	// required Logs for recording RINEX format
 //	my_gps.ConfigureLogs("versionb once");
@@ -65,6 +67,7 @@ void RunGnssThread(){
 	GNSS::getInstance()->ConfigureLogs("bestposb ontime 0.5");
 	GNSS::getInstance()->ConfigureLogs("bestvelb ontime 0.5");
 	GNSS::getInstance()->ConfigureLogs("bestxyzb ontime 0.5");
+	GNSS::getInstance()->ConfigureLogs("pdpxyzb ontime 0.5");
 	GNSS::getInstance()->ConfigureLogs("rangeb ontime 0.5");
 	//GNSS::getInstance()->ConfigureLogs("dualantennaheadingb ontime 0.5");
 	if (USE_GPS)
@@ -150,6 +153,9 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 		break;
 	case DUALANTENNAHEADING_LOG_TYPE :
 		sprintf(message_id_str, "DUALANTENNAHEADINGB");
+		break;
+	case PDPXYZB_LOG_TYPE:
+		sprintf(message_id_str, "PDPXYZB");
 		break;
 	default :
 		break;
@@ -380,6 +386,12 @@ void GNSS::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE me
 			best_position_ecef_callback_(msgBestxyzb_, read_timestamp_);
 		break;
 
+	case PDPXYZB_LOG_TYPE:
+		memcpy(&msgPdpxyzb_, message, sizeof(msgPdpxyzb_));
+		if (best_position_ecef_callback_)
+			best_position_ecef_callback_(msgPdpxyzb_, read_timestamp_);
+		break;
+
 	case DUALANTENNAHEADING_LOG_TYPE:
 		memcpy(&msgHeading_, message, sizeof(msgHeading_));
 		isDualheadingReady_ = true;
@@ -543,7 +555,7 @@ bool GNSS::Connect(std::string port, int baudrate, bool search) {
 			}
 
 			Disconnect();
-			boost::this_thread::sleep(boost::posix_time::milliseconds(1000));
+			//boost::this_thread::sleep(boost::posix_time::milliseconds(1000));
 
 			connected = Connect_(port, baudrate);
 		}
@@ -589,7 +601,7 @@ bool GNSS::Connect_(std::string port, int baudrate = 115200) {
 		// stop any incoming data and flush buffers
 		serial_port_->write("UNLOGALL\r\n");
 		// wait for data to stop cominig in
-		boost::this_thread::sleep(boost::posix_time::milliseconds(1000));
+		//boost::this_thread::sleep(boost::posix_time::milliseconds(1000));
 
 		// clear serial port buffers
 		serial_port_->flush();

@@ -34,7 +34,7 @@ using namespace gnss;
 #define USE_GAL (0)
 #define USE_BDS (0)
 #define USE_QZS (0)
-#define USE_SMOOTHING (1)
+#define USE_SMOOTHING (0)
 #define EL_MASK_IN_DEGREE	(10)
 
 /* CN0 Monitor */
@@ -45,7 +45,7 @@ using namespace gnss;
 #define CN0_REQUIRED_EPOCH_TO_RETURN	(120)
 
 /* Constants */
-#define EARTH_RADIUS		(6378136.3)  	// m
+#define EARTH_RADIUS			(6378136.3)  	// m
 #define IONO_LAYER_HEIGHT	(350000.0)			/* meters	*/
 #define SPEED_OF_LIGHT		(2.99792458e8) 	// m/s
 
@@ -101,7 +101,7 @@ using namespace gnss;
 #define FOURHOUR_SECOND		(4 * 3600.0)
 #define FIFTEENMINUTE_SECOND (15*60.0)
 #define TWENTYMINUTE_SECOND	(20*60.0)
-#define PI					(3.1415926535898)
+#define PI						(3.1415926535898)
 #define R2D					(180.0/PI)
 #define D2R					(PI/180.0)
 
@@ -141,6 +141,9 @@ using namespace gnss;
 #define kTwoFilterLenth			(2*kSmoothLen)   //=400pnts = 200sec
 #define kTwoFilterLenth2			(2*kSmoothLen2)   //=60pnts = 30sec
 
+#define POS			(1)
+#define VEL			(1)
+
 class GnssCore {
 public:
 	double svElRad_[NUMBER_OF_SATELLITES];
@@ -150,8 +153,12 @@ public:
 	double svPosition_[NUMBER_OF_SATELLITES][3]; // x,y,z in ECEF frame
 	double svVelocity_[NUMBER_OF_SATELLITES][3]; // x,y,z vel in ECEF
 	double usrPositionECEF_[3], usrPositionLLA_[3];
+	double usrVelocityECEF_[3], usrVelocityENU_[3];
+	double usrPosVelSD[6];
 	double usrBestposECEF_[3], usrBestposLLA_[3];
+	double usrBestvelECEF_[3], usrBestvelENU_[3];
 	double usrGpsClockOffset_, usrGloClockOffset_, usrGalClockOffset_, usrBdsClockOffset_, usrQzsClockOffset_;
+	double usrGpsClockDrift_, usrGloClockDrift_, usrGalClockDrift_, usrBdsClockDrift_, usrQzsClockDrift_;
 	double svIonoErr_[NUMBER_OF_SATELLITES];
 	double svTropoErr_[NUMBER_OF_SATELLITES];
 
@@ -187,6 +194,8 @@ public:
 	~GnssCore(){};
 	static GnssCore* getInstance();
 	void ProcessRange(double timeRangeHeader);
+	PositionEcef GetUsrxyz(){ return calEcefxyz_; }
+
 private:
 	GnssCore(){
 		usrGpsClockOffset_ = 0;
@@ -194,6 +203,11 @@ private:
 		usrGalClockOffset_ = 0;
 		usrBdsClockOffset_ = 0;
 		usrQzsClockOffset_ = 0;
+		usrGpsClockDrift_ = 0;
+		usrGloClockDrift_ = 0;
+		usrGalClockDrift_ = 0;
+		usrBdsClockDrift_ = 0;
+		usrQzsClockDrift_ = 0;
 		std::fill_n(mCountOnCSC1_, NUMBER_OF_SATELLITES, 1);
 		std::fill_n(mCountOnCSC2_, NUMBER_OF_SATELLITES, 1);
 
@@ -221,13 +235,16 @@ private:
 	void CalcElAz(unsigned char i);
 	void CalcIonoDelay(unsigned char i);
 	void CalcTropoDelay(unsigned char i);
-	void CalcLeastSquaredPosition();
+	void CalcLeastSquaredPosVel();
 	void MonitoringCN0();
 	bool CheckSvStatus();
 	MatrixXd SetErrCovariance();
 	MatrixXd SetGeomMatrix();
-	VectorXd SetResidualVector();
+	VectorXd SetResidualVectorPos();
+	VectorXd SetResidualVectorVel();
+
 	void SetUsrClockOffset(VectorXd dx);
+	void SetUsrClockDrift(VectorXd dx);
 	void ClearGnssFilter();
 	void PrintSvStatus();
 
@@ -261,6 +278,8 @@ private:
 	//	double 				mCSC1_corrected[NUMBER_OF_SATELLITES];
 	uint8_t 				flagCN0_[NUMBER_OF_SATELLITES];
 	uint8_t 				flagCN0Count_[NUMBER_OF_SATELLITES];
+
+	PositionEcef calEcefxyz_;
 
 };
 

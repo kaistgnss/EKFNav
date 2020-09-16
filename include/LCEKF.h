@@ -6,6 +6,8 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <iostream>
+#include <iomanip>
+#include <fstream>
 using namespace std;
 using namespace Eigen;
 
@@ -16,6 +18,8 @@ class LCEKF {
 	//LCEKF() {};
     void Configure();
     void PrintStatus();
+    void SystemSaveStatus();
+    void MeasSaveStatus();
     void Initialization(Vector3d Meas_omega_ib_b, Vector3d Meas_f_ib_b, Vector3d Meas_r_eb_e, Vector3d Meas_v_eb_e, Vector3d Bestpos_ECEF_SD, Vector3d Bestvel_ECEF_SD, double dualheading, bool is_dualheading);
     bool Initialized() { return initialized_; } // returns whether the INS has been initialized
     void Update(double t_gnss, double t_ins, Vector3d Meas_omega_ib_b, Vector3d Meas_f_ib_b, Vector3d Meas_r_eb_e, Vector3d Meas_v_eb_e, Vector3d Bestpos_ECEF_SD, Vector3d Bestvel_ECEF_SD, double dualheading, bool is_dualheading);
@@ -70,6 +74,11 @@ class LCEKF {
     Matrix<double,15,15> P_matrix_; // Covariance estimate
 
   private:
+    Vector3d Meas_f_ib_b_; // Measured acceleration in Body
+    Vector3d Meas_omega_ib_b_; // Measured rotation rate in Body
+    Vector3d Meas_r_eb_e_; // Measured position in ECEF
+    Vector3d Meas_v_eb_e_; // Measured velocity in ECEF
+
     // Model Constants
     const double G = 9.807; // Acceleration due to gravity
 
@@ -80,16 +89,17 @@ class LCEKF {
     double dt_s_ = 0.001666666666666666666;
     double t_gnss_prev_ = 0;
     double t_ins_prev_ = 0;
+    double t_gnss_, t_ins_;
     int num_ins_ = 0;
     int num_gnss_ = 0;
 
     // Sensor variances (as standard deviation) and models (tau)
-    double aNoiseSigma_mps2 = 0.0005; // 0.05
-    double aMarkovSigma_mps2 = 0.0001; // 0.01
+    double aNoiseSigma_mps2 = 0.005; // 0.05
+    double aMarkovSigma_mps2 = 0.001; // 0.01
     double aMarkovTau_s = 100.0;
 
-    double wNoiseSigma_rps2 = 0.00175; // 0.00175
-    double wMarkovSigma_rps2 = 0.00025; // 0.00025
+    double wNoiseSigma_rps2 = 0.000175; // 0.00175
+    double wMarkovSigma_rps2 = 0.000025; // 0.00025
     double wMarkovTau_s = 50.0;
 
 

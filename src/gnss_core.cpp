@@ -61,7 +61,7 @@ void GnssCore::ProcessRange(double timeRangeHeader){
 
 	CheckSvStatus();
 
-	CalcLeastSquaredPosition();
+	CalcLeastSquaredPosVel();
 
 	//PrintSvStatus();
 
@@ -86,14 +86,15 @@ bool GnssCore::CheckSvForProcess(unsigned char i){
 void GnssCore::InitializeGnssFilter(){
 
 	Position bestpos = GNSS::getInstance()->GetBestpos();
+	PositionEcef bestxyz = GNSS::getInstance()->GetBestxyz();
+
 	usrBestposLLA_[0] = bestpos.latitude * D2R;
 	usrBestposLLA_[1] = bestpos.longitude * D2R;
 	usrBestposLLA_[2] = bestpos.height + bestpos.undulation;
 
-	Vector3d ecef = ConvertLLA2ECEF(usrBestposLLA_[0], usrBestposLLA_[1], usrBestposLLA_[2]);
-	usrBestposECEF_[0] = ecef(0);
-	usrBestposECEF_[1] = ecef(1);
-	usrBestposECEF_[2] = ecef(2);
+	usrBestposECEF_[0] = bestxyz.x_position;
+	usrBestposECEF_[1] = bestxyz.y_position;
+	usrBestposECEF_[2] = bestxyz.z_position;
 
 	usrPositionECEF_[0] = usrBestposECEF_[0];
 	usrPositionECEF_[1] = usrBestposECEF_[1];
@@ -101,6 +102,18 @@ void GnssCore::InitializeGnssFilter(){
 	usrPositionLLA_[0] = usrBestposLLA_[0];
 	usrPositionLLA_[1] = usrBestposLLA_[1];
 	usrPositionLLA_[2] = usrBestposLLA_[2];
+
+	// Velocity
+	usrBestvelECEF_[0] = bestxyz.x_velocity;
+	usrBestvelECEF_[1] = bestxyz.y_velocity;
+	usrBestvelECEF_[2] = bestxyz.z_velocity;
+
+	usrVelocityECEF_[0] = usrBestvelECEF_[0];
+	usrVelocityECEF_[1] = usrBestvelECEF_[1];
+	usrVelocityECEF_[2] = usrBestvelECEF_[2];
+
+	// Transition Data
+	calEcefxyz_ = bestxyz;
 
 	// Measurement
 	RangeData 	obsSet;
@@ -134,9 +147,9 @@ void GnssCore::InitializeGnssFilter(){
 			mCurrentCode_[i] 			= obsSet.pseudorange;
 			mCurrentPhase_[i] 		= obsSet.accumulated_doppler;
 			mCurrentLockTime_[i] 	= obsSet.locktime;
-			mCodeRate_[i]				= mWaveLength_[i] * obsSet.doppler;
 			mCN0_[i]					= obsSet.carrier_to_noise;
 			mWaveLength_[i] 			= SPEED_OF_LIGHT/mFrequency_[i];
+			mCodeRate_[i]				= -mWaveLength_[i] * obsSet.doppler;
 			mLockFlag_[i]				= obsSet.channel_status.prn_lock_flag;
 		}
 	}
@@ -157,6 +170,7 @@ void GnssCore::CalcSvClockOffset(unsigned char i){
 			return;
 
 		svClockOffset_[i] = -taun + (gamma * tk);
+		svClockDrift_[i]  = gamma;
 	} else {
 		double n0, nk, Mk;
 		double Ek, rel_t;
@@ -570,6 +584,7 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		ikdot  =  idot + 2 * nukdot * (cis * cos(2 * phik) - cic * sin(2 * phik));
 		ukdot  =  nukdot + 2 * nukdot * (cus * cos(2 * phik) - cuc * sin(2 * phik));
 		rkdot  =  ecc * A * Ekdot * sin(Ek) + 2 * nukdot * (crs * cos(2 * phik) - crc * sin(2 * phik));
+
 		omegakdot = omegadot - omegadote_datum;
 		xodot  =  rkdot * cos(uk) - rk * ukdot * sin(uk);
 		yodot  =  rkdot * sin(uk) + rk * ukdot * cos(uk);
@@ -577,11 +592,16 @@ void GnssCore::CalcSvOrbit(unsigned char i){
 		xv_temp =  -xo * omegakdot * sin(omegak) + xodot * cos(omegak) - yodot * sin(omegak) * cos(ik) - yo * (omegakdot * cos(omegak) * cos(ik) - (ikdot) * sin(omegak) * sin(ik));
 		yv_temp =  xo * omegakdot * cos(omegak) + xodot * sin(omegak) + yodot * cos(omegak) * cos(ik) - yo * (omegakdot * sin(omegak) * cos(ik) + (ikdot) * cos(omegak) * sin(ik));
 		zv_temp =  yo * ikdot * cos(ik) + yodot * sin(ik);
+
 		svVelocity_[i][0] =  xv_temp * cos(tau * omegadote_datum) +
 								yv_temp * sin(tau * omegadote_datum);
 		svVelocity_[i][1] = -xv_temp * sin(tau * omegadote_datum) +
 								yv_temp * cos(tau * omegadote_datum);
 		svVelocity_[i][2] =  zv_temp;
+
+//		svVelocity_[i][0] =  xv_temp;
+//		svVelocity_[i][1] =  yv_temp;
+//		svVelocity_[i][2] =  zv_temp;
 	};
 
 
@@ -801,21 +821,24 @@ void GnssCore::CalcCarrierSmoothedCode(unsigned char i){
 	mCurrentCSC2_[i] = csc2;
 } // function: EstimateCSC
 
-void GnssCore::CalcLeastSquaredPosition() {
+void GnssCore::CalcLeastSquaredPosVel() {
 
-	double Norm_dX = 100;
+	double normalized_dpos = 100;
+	double normalized_dvel = 100;
 
 	MatrixXd W = SetErrCovariance();
 	VectorXd drho(numSvForPos_, 1);
 	VectorXd dx(3+numConstForPos_, 1);
+	MatrixXd Ppos, Pvel;
 
-//	// Calculate Position
+	// Position (ECEF) estimation
 	int iter = 0;
-	while(Norm_dX > 0.001) {
+	while(normalized_dpos > 0.0001) {
 		iter++;
 		MatrixXd G = SetGeomMatrix();
-		MatrixXd S = (G.transpose()*W*G).inverse() * G.transpose() * W;
-		VectorXd drho = SetResidualVector();
+		Ppos = (G.transpose()*W*G).inverse();
+		MatrixXd S = Ppos * G.transpose() * W;
+		VectorXd drho = SetResidualVectorPos();
 
 		dx = S * drho;
 
@@ -825,8 +848,44 @@ void GnssCore::CalcLeastSquaredPosition() {
 
 		SetUsrClockOffset(dx);
 
-		Norm_dX = sqrt(dx(0)*dx(0) + dx(1)*dx(1) + dx(2)*dx(2));
+		normalized_dpos = sqrt(dx(0)*dx(0) + dx(1)*dx(1) + dx(2)*dx(2));
 	}
+
+	// Velocity (ECEF) estimation
+	iter = 0;
+	while(normalized_dvel > 0.0001) {
+		iter++;
+		MatrixXd G = SetGeomMatrix();
+		Pvel = (G.transpose()*W*G).inverse();
+		MatrixXd S = Pvel * G.transpose() * W;
+		drho = SetResidualVectorVel();
+
+		dx = S * drho;
+
+		usrVelocityECEF_[0] = usrVelocityECEF_[0] + dx(0);
+		usrVelocityECEF_[1] = usrVelocityECEF_[1] + dx(1);
+		usrVelocityECEF_[2] = usrVelocityECEF_[2] + dx(2);
+
+		SetUsrClockDrift(dx);
+
+		normalized_dvel = sqrt(dx(0)*dx(0) + dx(1)*dx(1) + dx(2)*dx(2));
+	}
+
+	calEcefxyz_.x_position = usrPositionECEF_[0];
+	calEcefxyz_.y_position = usrPositionECEF_[1];
+	calEcefxyz_.z_position = usrPositionECEF_[2];
+
+	calEcefxyz_.x_velocity = usrVelocityECEF_[0];
+	calEcefxyz_.y_velocity = usrVelocityECEF_[1];
+	calEcefxyz_.z_velocity = usrVelocityECEF_[2];
+
+	calEcefxyz_.x_standard_deviation = Ppos(1,1);
+	calEcefxyz_.y_standard_deviation = Ppos(2,2);
+	calEcefxyz_.z_standard_deviation = Ppos(3,3);
+
+	calEcefxyz_.x_velocity_standard_deviation = Pvel(1,1);
+	calEcefxyz_.y_velocity_standard_deviation = Pvel(2,2);
+	calEcefxyz_.z_velocity_standard_deviation = Pvel(3,3);
 
 } // function: EstimateUsrPos
 
@@ -943,7 +1002,7 @@ MatrixXd GnssCore::SetGeomMatrix(){
 	return G;
 } // function: SetGeomMatrix
 
-VectorXd GnssCore::SetResidualVector(){
+VectorXd GnssCore::SetResidualVectorPos(){
 
 	double rangeMeasurement, usrClockOffset;
 	double dx, dy, dz, r;
@@ -991,6 +1050,56 @@ VectorXd GnssCore::SetResidualVector(){
 	}
 	return drho;
 } // function: SetResidualVector
+
+VectorXd GnssCore::SetResidualVectorVel(){
+
+	double rangeRateMeasurement, usrClockDrift;
+	double dx, dy, dz, r, pred_meas;
+	VectorXd drho = VectorXd::Constant(numSvForPos_,1,0);
+
+	uint8_t idxSv = 0;
+	for (int i = 0; i < NUMBER_OF_SATELLITES; i++){
+		if (isGoodForPos_[i]){
+
+			dx = svPosition_[i][0] - usrPositionECEF_[0];
+			dy = svPosition_[i][1] - usrPositionECEF_[1];
+			dz = svPosition_[i][2] - usrPositionECEF_[2];
+			r = sqrt(dx*dx + dy*dy + dz*dz);
+
+			rangeRateMeasurement = mCodeRate_[i];
+
+			switch (GetConstFlag(i)){
+			case FLAG_GPS:
+				usrClockDrift = usrGpsClockDrift_;
+				break;
+			case FLAG_GLO:
+				usrClockDrift = usrGloClockDrift_;
+				break;
+			case FLAG_GAL:
+				usrClockDrift = usrGalClockDrift_;
+				break;
+			case FLAG_BDS:
+				usrClockDrift = usrBdsClockDrift_;
+				break;
+			case FLAG_QZS:
+				usrClockDrift = usrQzsClockDrift_;
+				break;
+			default:
+				cout << "INVALID CONSTELLATION FLAG "<< endl;
+				break;
+			}
+
+			pred_meas   = dx/r * (svVelocity_[i][0] - usrVelocityECEF_[0]) +
+							dy/r * (svVelocity_[i][1] - usrVelocityECEF_[1]) +
+							dz/r * (svVelocity_[i][2] - usrVelocityECEF_[2]);
+
+			drho(idxSv) = rangeRateMeasurement - (pred_meas + usrClockDrift);
+
+			idxSv++;
+		}
+	}
+	return drho;
+} // function: SetResidualVectorVel
 
 void GnssCore::ClearGnssFilter(){
 
@@ -1290,6 +1399,145 @@ void GnssCore::SetUsrClockOffset(VectorXd dx){
 	}
 }
 
+void GnssCore::SetUsrClockDrift(VectorXd dx){
+
+	switch (constMode_) {
+	case GPS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		break;
+	case GLO:
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(3);
+		break;
+	case GAL:
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(3);
+		break;
+	case BDS:
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(3);
+		break;
+	case QZSS:
+		cout << "QZSS must not be used alone (insufficient satellites)." << endl;
+		break;
+	case GPS_GLO:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(4);
+		break;
+	case GPS_GAL:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(4);
+		break;
+	case GPS_BDS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(4);
+		break;
+	case GPS_QZSS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(4);
+		break;
+	case GLO_GAL:
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(3);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(4);
+		break;
+	case GLO_BDS:
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(3);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(4);
+		break;
+	case GLO_QZSS:
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(3);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(4);
+		break;
+	case GAL_BDS:
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(3);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(4);
+		break;
+	case GAL_QZSS:
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(3);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(4);
+		break;
+	case BDS_QZSS:
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(3);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(4);
+		break;
+	case GPS_GLO_GAL:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(4);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(5);
+		break;
+	case GPS_GLO_BDS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(4);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(5);
+		break;
+	case GPS_GLO_QZSS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(4);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(5);
+		break;
+	case GPS_GAL_BDS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(4);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(5);
+		break;
+	case GPS_GAL_QZSS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(4);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(5);
+		break;
+	case GLO_GAL_BDS:
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(3);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(4);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(5);
+		break;
+	case GLO_GAL_QZSS:
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(3);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(4);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(5);
+		break;
+	case GLO_BDS_QZSS:
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(3);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(4);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(5);
+		break;
+	case GAL_BDS_QZSS:
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(3);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(4);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(5);
+		break;
+	case GPS_GLO_GAL_BDS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(4);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(5);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(6);
+		break;
+	case GPS_GLO_GAL_QZSS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(4);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(5);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(6);
+		break;
+	case GPS_GAL_BDS_QZSS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(4);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(5);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(6);
+		break;
+	case GLO_GAL_BDS_QZSS:
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(3);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(4);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(5);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(6);
+		break;
+	case GPS_GLO_GAL_BDS_QZSS:
+		usrGpsClockDrift_ = usrGpsClockDrift_ + dx(3);
+		usrGloClockDrift_ = usrGloClockDrift_ + dx(4);
+		usrGalClockDrift_ = usrGalClockDrift_ + dx(5);
+		usrBdsClockDrift_ = usrBdsClockDrift_ + dx(6);
+		usrQzsClockDrift_ = usrQzsClockDrift_ + dx(7);
+		break;
+	default:
+		break;
+	}
+}
+
 void GnssCore::PrintSvStatus(){
 
 	bool isCN0[NUMBER_OF_SATELLITES];
@@ -1365,12 +1613,13 @@ void GnssCore::PrintSvStatus(){
 	err[2] = usrPositionECEF_[2] - usrBestposECEF_[2];
 
 	printf("\n");
-	printf("ESTIMATE:: %10.2f %10.2f %10.2f  --> err %6.3f %6.3f %6.3f (%2i)\n",
+	printf("ESTIMATE:: %10.2f %10.2f %10.2f  --> err %6.3f %6.3f %6.3f (%2i) Vel :: %2.10f %2.10f %2.10f\n",
 			usrPositionECEF_[0], usrPositionECEF_[1], usrPositionECEF_[2],
-			enu(0), enu(1), enu(2), numSvForPos_);
-	printf("BESTPOS :: %10.2f %10.2f %10.2f  --> err %6.3f %6.3f %6.3f (%2i)\n",
+			enu(0), enu(1), enu(2), numSvForPos_, usrVelocityECEF_[0], usrVelocityECEF_[1], usrVelocityECEF_[2]);
+	printf("BESTPOS :: %10.2f %10.2f %10.2f  --> err %6.3f %6.3f %6.3f (%2i) Vel :: %2.10f %2.10f %2.10f\n",
 			usrBestposECEF_[0], usrBestposECEF_[1], usrBestposECEF_[2],
-			enu_bp(0), enu_bp(1), enu_bp(2), bp.number_of_satellites_in_solution);
+			enu_bp(0), enu_bp(1), enu_bp(2), bp.number_of_satellites_in_solution,
+			usrBestvelECEF_[0], usrBestvelECEF_[1], usrBestvelECEF_[2]);
 	printf("\n");
 
 	//	printf(" Error  :: %10.2f %10.2f %10.2f\n",err[0],err[1],err[2]);

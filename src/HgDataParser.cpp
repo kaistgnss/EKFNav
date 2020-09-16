@@ -28,7 +28,6 @@ void HgDataParser::ReadIMU()
 	ReadBufferEnd = ReadBuffer + (ReadBufferEnd - ReadBufferAct);
 	ReadBufferAct = ReadBuffer;
 
-
 	if (!serial_read(SerialHandle, (char*)ReadBufferEnd, BUFFER_SIZE, &BytesRead))
 	{
 		printf("\nFailed to read Data!\n");
@@ -58,10 +57,11 @@ void HgDataParser::ReadIMU()
 				acc[0]=-Message.ControlMessage.LinearAcceleration[1];
 				acc[1]=Message.ControlMessage.LinearAcceleration[2];
 				acc[2]=-Message.ControlMessage.LinearAcceleration[0];
+				num++;
 				boost::posix_time::ptime present_time(
-				boost::posix_time::microsec_clock::universal_time());
+					boost::posix_time::microsec_clock::universal_time());
 				boost::posix_time::time_duration duration(present_time.time_of_day());
-				time = (duration.total_milliseconds()) / 1000.0;
+				time = (duration.total_microseconds()) / 1000000.0;
 			}
 			ReadBufferAct++;
 		}

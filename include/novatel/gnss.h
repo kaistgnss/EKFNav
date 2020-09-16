@@ -338,6 +338,7 @@ public:
 
     Position GetBestpos(){ return msgBestposb_; }
     PositionEcef GetBestxyz(){ return msgBestxyzb_; }
+    PositionEcef GetPdpxyz(){ return msgPdpxyzb_; }
     Heading GetDualheading(){ return msgHeading_; }
     double GetTimeBestpos(){ return timeBestposb_; }
     bool GetIsDualheading(){ return isDualheadingReady_; }
@@ -516,6 +517,7 @@ private:
 	RangeMeasurements 	msgRangeb_;
 	Velocity 				msgBestvelb_;
 	PositionEcef 			msgBestxyzb_;
+	PositionEcef			msgPdpxyzb_;
 	IonoModelKlobuchar	msgIonutcb_;
 	IonoModelNeQuick		msgGalIonob_;
 	Heading				msgHeading_;
